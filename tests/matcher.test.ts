@@ -17,7 +17,9 @@ const candidateIdols: IdolProfile[] = [
       实力派: 4,
       饭圈互动型: 3
     },
-    entryReasons: ["舞台直拍", "演唱会切片"]
+    entryReasons: ["舞台直拍", "演唱会切片"],
+    roles: ["歌手", "舞者"],
+    confidence: 90
   },
   {
     id: "quiet-actor",
@@ -30,7 +32,9 @@ const candidateIdols: IdolProfile[] = [
       演员型: 5,
       陪伴型: 3
     },
-    entryReasons: ["角色混剪"]
+    entryReasons: ["角色混剪"],
+    roles: ["演员"],
+    confidence: 84
   }
 ];
 
@@ -66,5 +70,24 @@ describe("idol matching", () => {
     assert.ok(top.score > second.score);
     assert.ok(top.matchedTags.includes("舞台型"));
     assert.ok(top.reasons.some((reason) => reason.includes("舞台型")));
+  });
+
+  it("returns confidence and dimension diagnostics for result explanations", () => {
+    const profile = {
+      selectedOptionIds: ["manual"],
+      tags: ["热血", "舞台型", "实力派", "饭圈互动型"],
+      traits: {
+        热血: 6,
+        舞台型: 6,
+        实力派: 4,
+        饭圈互动型: 3
+      }
+    };
+
+    const [top] = matchIdols(profile, candidateIdols);
+
+    assert.ok(top.confidence > 0);
+    assert.ok(top.dimensionScores.length >= 3);
+    assert.ok(top.dimensionScores.some((item) => item.label === "舞台"));
   });
 });

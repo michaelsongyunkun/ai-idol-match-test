@@ -86,6 +86,29 @@ const buildReasons = (
   return reasons;
 };
 
+const dimensionTagGroups = {
+  舞台: ["舞台型", "实力派", "热血"],
+  作品: ["演员型", "作品型", "创作型", "综艺型"],
+  陪伴: ["陪伴型", "温柔", "饭圈互动型"],
+  审美: ["清冷", "甜酷", "明媚", "高级感"],
+  参与: ["数据型", "线下应援型", "收藏型", "消费支持型", "安利型"]
+} as const;
+
+const buildDimensionScores = (userProfile: UserPreferenceProfile, idol: IdolProfile) =>
+  Object.entries(dimensionTagGroups)
+    .map(([label, tags]) => {
+      const matchedTags = tags.filter(
+        (tag) => (userProfile.traits[tag] ?? 0) > 0 && (idol.traits[tag] ?? 0) > 0
+      );
+      const score = matchedTags.reduce(
+        (total, tag) => total + Math.min(userProfile.traits[tag] ?? 0, idol.traits[tag] ?? 0),
+        0
+      );
+
+      return { label, score, matchedTags };
+    })
+    .sort((left, right) => right.score - left.score);
+
 export const matchIdols = (
   userProfile: UserPreferenceProfile,
   idols: IdolProfile[]
@@ -99,12 +122,18 @@ export const matchIdols = (
       const tagSimilarity =
         matchedTags.length / Math.max(1, Math.min(userProfile.tags.length, idol.tags.length));
       const score = Math.round(clamp((traitSimilarity * 0.78 + tagSimilarity * 0.22) * 100, 0, 99));
+      const dimensionScores = buildDimensionScores(userProfile, idol);
+      const confidence = Math.round(
+        clamp(score * 0.7 + Math.min(100, matchedTags.length * 8) * 0.3, 0, 100)
+      );
 
       return {
         idol,
         score,
+        confidence,
         matchedTags,
         reasons: buildReasons(userProfile, idol, matchedTags),
+        dimensionScores,
         tieBreaker: index
       };
     })
@@ -112,7 +141,9 @@ export const matchIdols = (
     .map((result) => ({
       idol: result.idol,
       score: result.score,
+      confidence: result.confidence,
       matchedTags: result.matchedTags,
-      reasons: result.reasons
+      reasons: result.reasons,
+      dimensionScores: result.dimensionScores
     }));
 };

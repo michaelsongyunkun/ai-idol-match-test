@@ -39,3 +39,12 @@ npm run dev -- --port 3220
 ```bash
 npm run verify
 ```
+
+## Production Verification
+
+```bash
+npm ci
+npm run verify
+```
+
+The app is ready to deploy after the command above passes and `data/idol-profiles.generated.ts` has been regenerated from the current `knowledge-base/` source.

@@ -584,6 +584,13 @@ button:disabled {
   font-weight: 800;
 }
 
+.score-confidence {
+  margin-top: 8px;
+  color: rgba(33, 27, 33, 0.72);
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .result-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 0.45fr);
@@ -607,10 +614,48 @@ button:disabled {
   line-height: 1.6;
 }
 
+.explanation-actions {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.ai-explanation {
+  margin: 0;
+  border: 1px solid rgba(79, 124, 255, 0.28);
+  border-radius: 8px;
+  background: #f4f7ff;
+  color: #31416f;
+  padding: 12px 14px;
+  line-height: 1.7;
+}
+
 .chip-cloud {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.dimension-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dimension-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dimension-row strong {
+  color: var(--ink);
 }
 
 .entry-list {
@@ -624,6 +669,20 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.share-status {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .candidate-card {

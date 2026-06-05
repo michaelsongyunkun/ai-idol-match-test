@@ -35,6 +35,8 @@ const genericHeadingTerms = [
   "复核建议"
 ];
 
+const knownRoles = ["演员", "歌手", "舞者", "爱豆", "音乐人", "主持人", "模特", "rapper"];
+
 export const slugify = (value) =>
   value
     .toLowerCase()
@@ -100,6 +102,32 @@ const compactSummary = (text) =>
     .trim()
     .slice(0, 160);
 
+const extractAge = (text) => {
+  const match = text.match(/(?:^|[^\d])(\d{2})(?:岁|。)/u);
+  return match ? Number(match[1]) : undefined;
+};
+
+const extractRegion = (text) => {
+  const match = text.match(/[男女]\s*\/\s*([^。|｜\s]+)/u);
+  return match?.[1];
+};
+
+const extractRoles = (text) => {
+  const lowerText = text.toLowerCase();
+
+  return knownRoles.filter((role) => lowerText.includes(role.toLowerCase()));
+};
+
+const scoreProfileConfidence = ({ tags, roles, age, region, summary }) => {
+  let score = 40;
+  if (tags.length >= 2) score += 20;
+  if (roles.length > 0) score += 15;
+  if (age) score += 10;
+  if (region) score += 10;
+  if (summary.length >= 40) score += 5;
+  return Math.min(100, score);
+};
+
 const entryReasonsFromTags = (tags) => {
   const reasons = [];
 
@@ -123,16 +151,25 @@ const entryReasonsFromTags = (tags) => {
 };
 
 const createProfile = (name, body, source) => {
-  const tags = pickProfileTags(`${name}\n${body}`);
+  const fullText = `${name}\n${body}`;
+  const tags = pickProfileTags(fullText);
+  const roles = extractRoles(fullText);
+  const age = extractAge(body);
+  const region = extractRegion(body);
+  const summary = compactSummary(body) || "知识库中提取到的候选爱豆资料。";
 
   return {
     id: slugify(name) || `idol-${Math.abs(name.length * 13)}`,
     name,
     source,
-    summary: compactSummary(body) || "知识库中提取到的候选爱豆资料。",
+    summary,
     tags,
     traits: traitsFromTags(tags, body),
-    entryReasons: entryReasonsFromTags(tags)
+    entryReasons: entryReasonsFromTags(tags),
+    roles,
+    region,
+    age,
+    confidence: scoreProfileConfidence({ tags, roles, age, region, summary })
   };
 };
 

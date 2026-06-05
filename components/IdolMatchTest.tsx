@@ -11,6 +11,7 @@ import {
   requiredDimensions,
   type QuizModeId
 } from "@/lib/quiz";
+import { buildShareText } from "@/lib/share";
 
 type Screen = "start" | "quiz" | "result" | "error";
 type Answers = Record<string, string>;
@@ -34,12 +35,43 @@ const getAnsweredCount = (answers: Answers, questions = quizQuestions) =>
 
 const sourceLabel = idolDataBundle.status.mode === "rag" ? "RAG 已读取" : "Mock 演示";
 
+const writeClipboardText = async (text: string) => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall back to the textarea path below when clipboard permission is unavailable.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
+
 export function IdolMatchTest() {
   const [screen, setScreen] = useState<Screen>("start");
   const [mode, setMode] = useState<QuizModeId>("experience");
   const [answers, setAnswers] = useState<Answers>({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hydrated, setHydrated] = useState(false);
+  const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const [aiExplanation, setAiExplanation] = useState("");
+  const [aiExplanationStatus, setAiExplanationStatus] = useState<
+    "idle" | "loading" | "ready" | "failed"
+  >("idle");
 
   const activeQuestions = useMemo(() => getQuizQuestionsForMode(mode), [mode]);
   const activeMode = quizModes[mode];
@@ -170,8 +202,53 @@ export function IdolMatchTest() {
     setAnswers({});
     setCurrentIndex(0);
     setScreen("start");
+    setShareStatus("idle");
+    setAiExplanation("");
+    setAiExplanationStatus("idle");
     window.localStorage.removeItem(storageKey);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const copyResult = async () => {
+    if (!topMatch) {
+      return;
+    }
+
+    const text = buildShareText({
+      modeName: activeMode.name,
+      idolName: topMatch.idol.name,
+      score: topMatch.score,
+      tags: topMatch.matchedTags
+    });
+
+    const copied = await writeClipboardText(text);
+    setShareStatus(copied ? "copied" : "failed");
+  };
+
+  const generateExplanation = async () => {
+    if (!topMatch) {
+      return;
+    }
+
+    setAiExplanationStatus("loading");
+
+    try {
+      const response = await fetch("/api/explain-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idolName: topMatch.idol.name,
+          userTags: topUserTags,
+          matchedTags: topMatch.matchedTags,
+          entryReasons: topMatch.idol.entryReasons
+        })
+      });
+      const payload = (await response.json()) as { explanation?: string };
+      setAiExplanation(payload.explanation ?? "");
+      setAiExplanationStatus(payload.explanation ? "ready" : "failed");
+    } catch {
+      setAiExplanationStatus("failed");
+    }
   };
 
   if (screen === "error") {
@@ -379,6 +456,7 @@ export function IdolMatchTest() {
                   <span>
                     <span className="score-value">{topMatch.score}</span>
                     <span className="score-label">匹配分</span>
+                    <span className="score-confidence">置信度 {topMatch.confidence}%</span>
                   </span>
                 </div>
               </div>
@@ -391,6 +469,16 @@ export function IdolMatchTest() {
                       <li key={reason}>{reason}</li>
                     ))}
                   </ul>
+                  <div className="explanation-actions">
+                    <button className="secondary-button" type="button" onClick={generateExplanation}>
+                      生成入坑解读
+                    </button>
+                    {aiExplanationStatus === "loading" && <p className="small-muted">生成中...</p>}
+                    {aiExplanationStatus === "ready" && <p className="ai-explanation">{aiExplanation}</p>}
+                    {aiExplanationStatus === "failed" && (
+                      <p className="small-muted">暂时无法生成，可先查看上方匹配理由。</p>
+                    )}
+                  </div>
                 </div>
 
                 <aside>
@@ -400,6 +488,17 @@ export function IdolMatchTest() {
                       <span className="matched-chip" key={tag}>
                         {tag}
                       </span>
+                    ))}
+                  </div>
+                  <p className="section-kicker" style={{ marginTop: 22 }}>
+                    MATCH MAP
+                  </p>
+                  <div className="dimension-list">
+                    {topMatch.dimensionScores.slice(0, 3).map((item) => (
+                      <div className="dimension-row" key={item.label}>
+                        <span>{item.label}</span>
+                        <strong>{item.score}</strong>
+                      </div>
                     ))}
                   </div>
                   <p className="section-kicker" style={{ marginTop: 22 }}>
@@ -420,9 +519,19 @@ export function IdolMatchTest() {
                   <p className="section-kicker">TOP 3</p>
                   <h2 className="brand-title">候选推荐</h2>
                 </div>
-                <button className="secondary-button" type="button" onClick={restart}>
-                  重新测试
-                </button>
+                <div className="result-actions">
+                  <button className="secondary-button" type="button" onClick={copyResult}>
+                    复制结果
+                  </button>
+                  <button className="secondary-button" type="button" onClick={restart}>
+                    重新测试
+                  </button>
+                  {shareStatus !== "idle" && (
+                    <span className="share-status">
+                      {shareStatus === "copied" ? "已复制" : "复制失败，可手动截图分享"}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="top3-grid">
                 {matches.slice(0, 3).map((match, index) => (

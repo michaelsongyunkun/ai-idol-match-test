@@ -20,6 +20,10 @@ export type IdolProfile = {
   tags: string[];
   traits: Record<string, number>;
   entryReasons: string[];
+  roles: string[];
+  region?: string;
+  age?: number;
+  confidence: number;
 };
 
 export type UserPreferenceProfile = {
@@ -28,11 +32,19 @@ export type UserPreferenceProfile = {
   traits: Record<string, number>;
 };
 
+export type DimensionScore = {
+  label: string;
+  score: number;
+  matchedTags: string[];
+};
+
 export type MatchResult = {
   idol: IdolProfile;
   score: number;
+  confidence: number;
   matchedTags: string[];
   reasons: string[];
+  dimensionScores: DimensionScore[];
 };
 
 export type IdolDataStatus = {

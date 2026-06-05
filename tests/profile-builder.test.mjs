@@ -66,4 +66,19 @@ describe("idol profile builder", () => {
     assert.ok(profiles[0].tags.includes("舞台型"));
     assert.ok(profiles[1].tags.includes("创作型"));
   });
+
+  it("extracts structured profile fields when source copy contains age, region, and roles", () => {
+    const markdown = [
+      "| 序号 | 姓名 | 资料 |",
+      "| --- | --- | --- |",
+      "| 1 | 王一博 | 28。男 / 中国。演员/歌手/舞者。冷感、专注、酷。UNIQ 成员；《陈情令》《无名》《热烈》。 |"
+    ].join("\n");
+
+    const [profile] = extractProfilesFromMarkdown(markdown, "test.md");
+
+    assert.equal(profile.age, 28);
+    assert.equal(profile.region, "中国");
+    assert.deepEqual(profile.roles, ["演员", "歌手", "舞者"]);
+    assert.ok(profile.confidence >= 70);
+  });
 });

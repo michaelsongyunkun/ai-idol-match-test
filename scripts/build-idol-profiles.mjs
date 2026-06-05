@@ -7,9 +7,9 @@ import {
   extractProfilesFromMarkdown
 } from "./profile-builder.mjs";
 
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const workspaceRoot = resolve(projectRoot, "..", "..");
-const outputFile = join(projectRoot, "data", "idol-profiles.generated.ts");
+const defaultProjectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const defaultWorkspaceRoot = resolve(defaultProjectRoot, "..", "..");
+const defaultOutputFile = join(defaultProjectRoot, "data", "idol-profiles.generated.ts");
 const searchedHints = [
   "knowledge-base/年轻向全球idol资料清单_120plus.md",
   "工作区内包含“明星对话”的 Markdown/TXT/JSON",
@@ -73,7 +73,7 @@ const findCandidateFiles = (root, maxDepth = 7) => {
   return results;
 };
 
-const parseSourceFile = (filePath) => {
+const parseSourceFile = (filePath, workspaceRoot) => {
   const raw = readFileSync(filePath, "utf8");
   const extension = extname(filePath).toLowerCase();
   const source = relative(workspaceRoot, filePath).replace(/\\/g, "/");
@@ -89,17 +89,17 @@ const parseSourceFile = (filePath) => {
   return extractProfilesFromMarkdown(raw, source);
 };
 
-const buildBundle = () => {
+export const buildBundle = ({
+  projectRoot = defaultProjectRoot,
+  workspaceRoot = defaultWorkspaceRoot
+} = {}) => {
   const directRagFile = join(projectRoot, "knowledge-base", "年轻向全球idol资料清单_120plus.md");
-  const files = [
-    ...(existsSync(directRagFile) ? [directRagFile] : []),
-    ...findCandidateFiles(workspaceRoot)
-  ];
+  const files = existsSync(directRagFile) ? [directRagFile] : findCandidateFiles(workspaceRoot);
   const uniqueFiles = [...new Set(files)];
   const profiles = new Map();
 
   for (const file of uniqueFiles) {
-    for (const profile of parseSourceFile(file)) {
+    for (const profile of parseSourceFile(file, workspaceRoot)) {
       if (!profiles.has(profile.name)) {
         profiles.set(profile.name, profile);
       }
@@ -131,7 +131,7 @@ const buildBundle = () => {
   };
 };
 
-const writeBundle = (bundle) => {
+export const writeBundle = (bundle, outputFile = defaultOutputFile) => {
   mkdirSync(dirname(outputFile), { recursive: true });
   const content = `import type { IdolDataBundle } from "../lib/types";
 
@@ -141,6 +141,8 @@ export const idolDataBundle: IdolDataBundle = ${JSON.stringify(bundle, null, 2)}
   writeFileSync(outputFile, content, "utf8");
 };
 
-const bundle = buildBundle();
-writeBundle(bundle);
-console.log(`${bundle.status.message} 候选库文件：${relative(projectRoot, outputFile)}`);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const bundle = buildBundle();
+  writeBundle(bundle);
+  console.log(`${bundle.status.message} 候选库文件：${relative(defaultProjectRoot, defaultOutputFile)}`);
+}
