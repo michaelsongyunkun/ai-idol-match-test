@@ -20,15 +20,32 @@ describe("app handoff copy", () => {
   it("surfaces match diagnostics on the result page", () => {
     assert.match(componentSource, /MATCH MAP/);
     assert.match(componentSource, /dimensionScores/);
+    assert.match(componentSource, /dimension-track/);
   });
 
   it("offers a copyable share result action", () => {
     assert.match(componentSource, /buildShareText/);
     assert.match(componentSource, /复制结果/);
+    assert.match(componentSource, /下载海报/);
+    assert.match(componentSource, /share-poster/);
   });
 
-  it("offers an AI-style entry explanation action", () => {
-    assert.match(componentSource, /generateExplanation/);
-    assert.match(componentSource, /生成入坑解读/);
+  it("requires DeepSeek API connection before starting the quiz", () => {
+    assert.match(componentSource, /deepSeekApiKey/);
+    assert.match(componentSource, /connectDeepSeek/);
+    assert.match(componentSource, /disabled=\{!isDeepSeekConnected\}/);
+  });
+
+  it("surfaces result growth features for comparison, entry path, and history", () => {
+    assert.match(componentSource, /displayTopMatches/);
+    assert.match(componentSource, /entry-card-list/);
+    assert.match(componentSource, /收藏与历史/);
+    assert.match(componentSource, /toggleCurrentFavorite/);
+  });
+
+  it("generates final match results through DeepSeek instead of local fallback", () => {
+    assert.match(componentSource, /generateDeepSeekMatchResult/);
+    assert.match(componentSource, /api\/deepseek-result/);
+    assert.match(componentSource, /DeepSeek 生成/);
   });
 });

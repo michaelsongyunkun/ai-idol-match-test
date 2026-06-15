@@ -5,7 +5,15 @@
 - 体验版：15题，更快完成，适合先玩一轮。
 - 专业版：40题，画像更细，推荐解释更完整。
 
-答完后会展示 Top 1 最可能粉上的爱豆、Top 3 候选、匹配标签、入坑理由和用户画像解释。
+用户必须先在开始页连接自己的 DeepSeek API Key，才能进入测评流程。
+答完后会把用户偏好和候选短名单发送给 DeepSeek，由 DeepSeek 生成 Top 1、Top 3、匹配理由、三步入坑路径和 MATCH MAP 维度结果。
+结果页支持下载分享海报、复制结果文案，以及浏览器本地收藏/历史记录。
+
+DeepSeek API 连接使用官方 OpenAI 兼容接口：
+
+- `GET https://api.deepseek.com/models` 校验用户 API Key。
+- `POST https://api.deepseek.com/chat/completions` 生成测评结果。
+- 当前结果模型：`deepseek-v4-flash`。
 
 启动时会运行 `scripts/build-idol-profiles.mjs`，优先查找：
 
