@@ -1,5 +1,6 @@
 import {
   buildDeepSeekMessages,
+  buildDeepSeekRepairMessages,
   deepSeekBaseUrl,
   deepSeekResultModel,
   mapDeepSeekStatusToError,
@@ -47,6 +48,66 @@ export async function POST(request: Request) {
     );
   }
 
+  const requestInput = { modeName, userTags, candidates };
+  const firstAttempt = await requestDeepSeekCompletion({
+    apiKey,
+    messages: buildDeepSeekMessages(requestInput),
+    maxTokens: 2200
+  });
+
+  if ("error" in firstAttempt) {
+    return firstAttempt.error;
+  }
+
+  const firstResult = parseDeepSeekGeneratedResult(firstAttempt.content, candidates);
+
+  if (firstResult) {
+    return Response.json({
+      result: firstResult,
+      model: deepSeekResultModel,
+      usage: firstAttempt.usage,
+      repaired: false
+    });
+  }
+
+  const repairAttempt = await requestDeepSeekCompletion({
+    apiKey,
+    messages: buildDeepSeekRepairMessages(requestInput, firstAttempt.content, [
+      "第一次结果内容过短或字段不完整，未通过后端质量校验。"
+    ]),
+    maxTokens: 2600
+  });
+
+  if ("error" in repairAttempt) {
+    return repairAttempt.error;
+  }
+
+  const repairedResult = parseDeepSeekGeneratedResult(repairAttempt.content, candidates);
+
+  if (!repairedResult) {
+    return Response.json(
+      { error: { code: "DEEPSEEK_INVALID_RESULT", message: "DeepSeek 返回结果内容仍然过短，请重新生成。" } },
+      { status: 502 }
+    );
+  }
+
+  return Response.json({
+    result: repairedResult,
+    model: deepSeekResultModel,
+    usage: repairAttempt.usage,
+    repaired: true
+  });
+}
+
+async function requestDeepSeekCompletion({
+  apiKey,
+  messages,
+  maxTokens
+}: {
+  apiKey: string;
+  messages: Array<{ role: string; content: string }>;
+  maxTokens: number;
+}): Promise<{ content: string; usage: unknown } | { error: Response }> {
   let deepSeekResponse: Response;
 
   try {
@@ -58,25 +119,29 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: deepSeekResultModel,
-        messages: buildDeepSeekMessages({ modeName, userTags, candidates }),
+        messages,
         response_format: { type: "json_object" },
         thinking: { type: "disabled" },
-        temperature: 0.4,
-        max_tokens: 1400,
+        temperature: 0.55,
+        max_tokens: maxTokens,
         stream: false
       })
     });
   } catch {
-    return Response.json(
-      { error: { code: "DEEPSEEK_NETWORK_ERROR", message: "无法连接 DeepSeek API。" } },
-      { status: 502 }
-    );
+    return {
+      error: Response.json(
+        { error: { code: "DEEPSEEK_NETWORK_ERROR", message: "无法连接 DeepSeek API。" } },
+        { status: 502 }
+      )
+    };
   }
 
   if (!deepSeekResponse.ok) {
-    return Response.json(mapDeepSeekStatusToError(deepSeekResponse.status), {
-      status: deepSeekResponse.status
-    });
+    return {
+      error: Response.json(mapDeepSeekStatusToError(deepSeekResponse.status), {
+        status: deepSeekResponse.status
+      })
+    };
   }
 
   const completion = (await deepSeekResponse.json()) as {
@@ -86,24 +151,16 @@ export async function POST(request: Request) {
   const content = completion.choices?.[0]?.message?.content;
 
   if (!content) {
-    return Response.json(
-      { error: { code: "DEEPSEEK_EMPTY_RESULT", message: "DeepSeek 未返回可用结果。" } },
-      { status: 502 }
-    );
+    return {
+      error: Response.json(
+        { error: { code: "DEEPSEEK_EMPTY_RESULT", message: "DeepSeek 未返回可用结果。" } },
+        { status: 502 }
+      )
+    };
   }
 
-  const result = parseDeepSeekGeneratedResult(content, candidates);
-
-  if (!result) {
-    return Response.json(
-      { error: { code: "DEEPSEEK_INVALID_RESULT", message: "DeepSeek 返回结果格式不符合要求。" } },
-      { status: 502 }
-    );
-  }
-
-  return Response.json({
-    result,
-    model: deepSeekResultModel,
+  return {
+    content,
     usage: completion.usage ?? null
-  });
+  };
 }
