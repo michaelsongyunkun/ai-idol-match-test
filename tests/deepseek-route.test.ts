@@ -127,6 +127,7 @@ describe("DeepSeek API routes", () => {
           apiKey: "sk-test",
           modeName: "体验版",
           userTags: ["舞台型"],
+          fixedIdolId: "idol-a",
           candidates: [
             {
               id: "idol-a",
@@ -161,6 +162,7 @@ describe("DeepSeek API routes", () => {
     assert.equal(deepSeekRequest.model, "deepseek-v4-flash");
     assert.equal(deepSeekRequest.response_format?.type, "json_object");
     assert.match(deepSeekRequest.messages?.[0]?.content ?? "", /JSON/);
+    assert.match(deepSeekRequest.messages?.[0]?.content ?? "", /固定值：idol-a/);
   });
 
   it("retries once when the first DeepSeek result is too sparse", async () => {
@@ -200,6 +202,7 @@ describe("DeepSeek API routes", () => {
           apiKey: "sk-test",
           modeName: "体验版",
           userTags: ["舞台型"],
+          fixedIdolId: "idol-a",
           candidates: [
             {
               id: "idol-a",
@@ -227,5 +230,60 @@ describe("DeepSeek API routes", () => {
     assert.equal(payload.repaired, true);
     assert.equal(payload.result?.reasons?.length, 4);
     assert.match(repairPrompt, /重新生成严格 JSON/);
+  });
+
+  it("retries when DeepSeek tries to replace the fixed idol result", async () => {
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls += 1;
+
+      return Response.json({
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: calls === 1 ? richGeneratedContent("idol-b") : richGeneratedContent("idol-a")
+            }
+          }
+        ],
+        usage: { total_tokens: calls === 1 ? 120 : 260 }
+      });
+    }) as typeof fetch;
+
+    const response = await resultPost(
+      new Request("http://localhost/api/deepseek-result", {
+        method: "POST",
+        body: JSON.stringify({
+          apiKey: "sk-test",
+          modeName: "体验版",
+          userTags: ["舞台型"],
+          fixedIdolId: "idol-a",
+          candidates: [
+            {
+              id: "idol-a",
+              name: "测试爱豆 A",
+              summary: "候选 A",
+              score: 88,
+              confidence: 80,
+              tags: ["舞台型", "清冷", "实力派"],
+              matchedTags: ["舞台型", "清冷", "实力派"],
+              entryReasons: ["舞台直拍", "练习室视频", "采访切片"],
+              dimensionScores: [
+                { label: "舞台", score: 8, matchedTags: ["舞台型"] },
+                { label: "审美", score: 7, matchedTags: ["清冷"] },
+                { label: "作品", score: 5, matchedTags: ["实力派"] }
+              ]
+            }
+          ]
+        })
+      })
+    );
+    const payload = (await response.json()) as { repaired?: boolean; result?: { idolId?: string } };
+
+    assert.equal(response.status, 200);
+    assert.equal(calls, 2);
+    assert.equal(payload.repaired, true);
+    assert.equal(payload.result?.idolId, "idol-a");
   });
 });

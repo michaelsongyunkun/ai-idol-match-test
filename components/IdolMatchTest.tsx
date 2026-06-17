@@ -163,27 +163,17 @@ export function IdolMatchTest() {
     () => (answeredCount === activeQuestions.length ? matchIdols(userProfile, idolDataBundle.profiles) : []),
     [activeQuestions.length, answeredCount, userProfile]
   );
+  const fixedMatch = matches[0];
   const topMatch = useMemo<MatchResult | undefined>(() => {
-    if (!deepSeekResult) {
-      return undefined;
-    }
-
-    const baseMatch = matches.find((match) => match.idol.id === deepSeekResult.idolId);
-
-    if (!baseMatch) {
+    if (!deepSeekResult || !fixedMatch || deepSeekResult.idolId !== fixedMatch.idol.id) {
       return undefined;
     }
 
     return {
-      ...baseMatch,
-      score: deepSeekResult.score,
-      confidence: deepSeekResult.confidence,
-      matchedTags: deepSeekResult.matchedTags.length > 0 ? deepSeekResult.matchedTags : baseMatch.matchedTags,
-      reasons: deepSeekResult.reasons.length > 0 ? deepSeekResult.reasons : baseMatch.reasons,
-      dimensionScores:
-        deepSeekResult.dimensionScores.length > 0 ? deepSeekResult.dimensionScores : baseMatch.dimensionScores
+      ...fixedMatch,
+      reasons: deepSeekResult.reasons.length > 0 ? deepSeekResult.reasons : fixedMatch.reasons
     };
-  }, [deepSeekResult, matches]);
+  }, [deepSeekResult, fixedMatch]);
   const topUserTags = getTopUserTags(userProfile, 8);
   const answerSignature = useMemo(
     () => activeQuestions.map((question) => answers[question.id] ?? "-").join("|"),
@@ -202,27 +192,18 @@ export function IdolMatchTest() {
       return [];
     }
 
-    return deepSeekResult.top3
-      .map((item) => {
-        const match = matches.find((candidate) => candidate.idol.id === item.idolId);
+    return matches.slice(0, 3).map((match, index) => {
+      const generated = deepSeekResult.top3.find((item) => item.idolId === match.idol.id);
 
-        if (!match) {
-          return null;
-        }
-
-        return {
-          match: {
-            ...match,
-            score: item.score,
-            matchedTags:
-              item.idolId === deepSeekResult.idolId && deepSeekResult.matchedTags.length > 0
-                ? deepSeekResult.matchedTags
-                : match.matchedTags
-          },
-          difference: item.difference
-        };
-      })
-      .filter((item): item is { match: MatchResult; difference: string } => Boolean(item));
+      return {
+        match,
+        difference:
+          generated?.difference ??
+          (index === 0
+            ? "这是固定答案表命中的第一名，DeepSeek 只补充分析，不改变匹配对象。"
+            : "这是固定匹配排序中的备选结果，DeepSeek 未返回额外差异说明。")
+      };
+    });
   }, [deepSeekResult, matches]);
   const entryPathCards = useMemo(
     () => (topMatch ? buildEntryPathCards(topMatch.idol, deepSeekResult?.entryPath ?? []) : []),
@@ -341,7 +322,7 @@ export function IdolMatchTest() {
       }
 
       setDeepSeekConnectionStatus("connected");
-      setDeepSeekMessage(`已连接 DeepSeek，结果将由 ${payload.model ?? "DeepSeek"} 生成。`);
+      setDeepSeekMessage(`已连接 DeepSeek，匹配答案固定，分析将由 ${payload.model ?? "DeepSeek"} 生成。`);
     } catch {
       setDeepSeekConnectionStatus("failed");
       setDeepSeekMessage("无法连接 DeepSeek API，请检查网络或 API Key。");
@@ -357,8 +338,9 @@ export function IdolMatchTest() {
     }
 
     const candidates = buildDeepSeekCandidates(matches);
+    const fixedIdolId = candidates[0]?.id ?? "";
 
-    if (candidates.length === 0) {
+    if (candidates.length === 0 || !fixedIdolId) {
       setDeepSeekResultStatus("failed");
       setDeepSeekMessage("当前没有足够候选数据生成结果。");
       setScreen("generating");
@@ -378,6 +360,7 @@ export function IdolMatchTest() {
           apiKey: deepSeekApiKey.trim(),
           modeName: activeMode.name,
           userTags: topUserTags,
+          fixedIdolId,
           candidates
         })
       });
@@ -651,7 +634,7 @@ export function IdolMatchTest() {
               <label className="api-key-label" htmlFor="deepseek-api-key">
                 先连接 DeepSeek API Key 才能开始测评
               </label>
-              <p className="small-muted">API Key 只用于本次页面会话，测评结果由 DeepSeek 生成。</p>
+              <p className="small-muted">API Key 只用于本次页面会话，匹配爱豆固定，具体分析由 DeepSeek 生成。</p>
             </div>
             <div className="api-key-row">
               <input
@@ -848,7 +831,7 @@ export function IdolMatchTest() {
             <p className="hero-copy">
               {deepSeekResultStatus === "failed"
                 ? deepSeekMessage
-                : "正在把你的偏好画像和候选短名单发送给 DeepSeek，结果生成前不会展示本地匹配兜底。"}
+                : "正在把固定匹配结果和候选短名单发送给 DeepSeek，生成前不会展示分析兜底。"}
             </p>
             <div className="start-actions">
               <button
@@ -871,7 +854,7 @@ export function IdolMatchTest() {
             <article className="result-hero">
               <div className="result-top">
                 <div>
-                  <p className="idol-rank">TOP 1 · {activeMode.name} · DeepSeek 生成</p>
+                  <p className="idol-rank">TOP 1 · {activeMode.name} · 固定匹配 · DeepSeek 分析</p>
                   <h2 className="idol-name">{topMatch.idol.name}</h2>
                   <p className="idol-summary">{resultSummary}</p>
                   <div className="chip-cloud" style={{ marginTop: 16 }}>

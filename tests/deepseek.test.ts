@@ -40,23 +40,27 @@ describe("DeepSeek result contract", () => {
     const messages = buildDeepSeekMessages({
       modeName: "体验版",
       userTags: ["舞台型"],
+      fixedIdolId: "idol-a",
       candidates
     });
 
     assert.match(messages[0].content, /JSON/);
     assert.match(messages[0].content, /不可信数据/);
+    assert.match(messages[0].content, /固定结果/);
+    assert.match(messages[0].content, /idol-a/);
     assert.match(messages[0].content, /summary 80 到 120 字/);
     assert.match(messages[1].content, /idol-a/);
   });
 
   it("builds a repair prompt when a generated result is too sparse", () => {
     const messages = buildDeepSeekRepairMessages(
-      { modeName: "体验版", userTags: ["舞台型"], candidates },
+      { modeName: "体验版", userTags: ["舞台型"], fixedIdolId: "idol-a", candidates },
       "{\"idolId\":\"idol-a\"}",
       ["summary 少于 60 字。"]
     );
 
     assert.match(messages[0].content, /重新生成严格 JSON/);
+    assert.match(messages[0].content, /固定值：idol-a/);
     assert.match(messages[1].content, /summary 少于 60 字/);
   });
 
@@ -102,6 +106,7 @@ describe("DeepSeek result contract", () => {
 
     assert.equal(parseDeepSeekGeneratedResult(JSON.stringify({ idolId: "idol-a", summary: "太短" }), candidates), null);
     assert.equal(parseDeepSeekGeneratedResult(JSON.stringify({ idolId: "missing" }), candidates), null);
+    assert.equal(parseDeepSeekGeneratedResult(JSON.stringify({ idolId: "idol-b" }), candidates, "idol-a"), null);
   });
 
   it("sanitizes candidates and maps common DeepSeek error statuses", () => {

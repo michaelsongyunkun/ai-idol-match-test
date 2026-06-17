@@ -44,9 +44,10 @@ describe("app handoff copy", () => {
     assert.match(componentSource, /toggleCurrentFavorite/);
   });
 
-  it("generates final match results through DeepSeek instead of local fallback", () => {
+  it("locks the idol match locally and uses DeepSeek for analysis copy", () => {
     assert.match(componentSource, /generateDeepSeekMatchResult/);
     assert.match(componentSource, /api\/deepseek-result/);
-    assert.match(componentSource, /DeepSeek 生成/);
+    assert.match(componentSource, /fixedIdolId/);
+    assert.match(componentSource, /固定匹配/);
   });
 });

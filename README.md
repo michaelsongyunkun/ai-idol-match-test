@@ -6,13 +6,13 @@
 - 专业版：40题，画像更细，推荐解释更完整。
 
 用户必须先在开始页连接自己的 DeepSeek API Key，才能进入测评流程。
-答完后会把用户偏好和候选短名单发送给 DeepSeek，由 DeepSeek 生成 Top 1、Top 3、匹配理由、三步入坑路径和 MATCH MAP 维度结果。
+答完后会先由本地固定匹配规则确定 Top 1 和候选排序，同一组选项永远对应同一个爱豆；随后把固定匹配结果和候选短名单发送给 DeepSeek，由 DeepSeek 生成匹配理由、三步入坑路径和候选差异分析。
 结果页支持下载分享海报、复制结果文案，以及浏览器本地收藏/历史记录。
 
 DeepSeek API 连接使用官方 OpenAI 兼容接口：
 
 - `GET https://api.deepseek.com/models` 校验用户 API Key。
-- `POST https://api.deepseek.com/chat/completions` 生成测评结果。
+- `POST https://api.deepseek.com/chat/completions` 生成固定匹配结果的解释文案。
 - 当前结果模型：`deepseek-v4-flash`。
 
 启动时会运行 `scripts/build-idol-profiles.mjs`，优先查找：

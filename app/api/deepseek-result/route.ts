@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     modeName?: unknown;
     userTags?: unknown;
     candidates?: unknown;
+    fixedIdolId?: unknown;
   };
   const apiKey = parseApiKey(body.apiKey);
   const modeName = typeof body.modeName === "string" ? body.modeName : "";
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
     ? body.userTags.filter((tag): tag is string => typeof tag === "string").slice(0, 12)
     : [];
   const candidates = parseDeepSeekCandidates(body.candidates);
+  const fixedIdolId = typeof body.fixedIdolId === "string" ? body.fixedIdolId.trim() : "";
 
   if (!apiKey) {
     return Response.json(
@@ -41,14 +43,14 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!modeName || candidates.length === 0) {
+  if (!modeName || candidates.length === 0 || !fixedIdolId || !candidates.some((candidate) => candidate.id === fixedIdolId)) {
     return Response.json(
-      { error: { code: "INVALID_MATCH_CONTEXT", message: "缺少可生成测评结果的匹配上下文。" } },
+      { error: { code: "INVALID_MATCH_CONTEXT", message: "缺少固定匹配结果或可生成分析的候选上下文。" } },
       { status: 422 }
     );
   }
 
-  const requestInput = { modeName, userTags, candidates };
+  const requestInput = { modeName, userTags, candidates, fixedIdolId };
   const firstAttempt = await requestDeepSeekCompletion({
     apiKey,
     messages: buildDeepSeekMessages(requestInput),
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     return firstAttempt.error;
   }
 
-  const firstResult = parseDeepSeekGeneratedResult(firstAttempt.content, candidates);
+  const firstResult = parseDeepSeekGeneratedResult(firstAttempt.content, candidates, fixedIdolId);
 
   if (firstResult) {
     return Response.json({
@@ -73,7 +75,7 @@ export async function POST(request: Request) {
   const repairAttempt = await requestDeepSeekCompletion({
     apiKey,
     messages: buildDeepSeekRepairMessages(requestInput, firstAttempt.content, [
-      "第一次结果内容过短或字段不完整，未通过后端质量校验。"
+      "第一次结果内容过短、字段不完整，或 idolId 没有等于固定答案，未通过后端质量校验。"
     ]),
     maxTokens: 2600
   });
@@ -82,7 +84,7 @@ export async function POST(request: Request) {
     return repairAttempt.error;
   }
 
-  const repairedResult = parseDeepSeekGeneratedResult(repairAttempt.content, candidates);
+  const repairedResult = parseDeepSeekGeneratedResult(repairAttempt.content, candidates, fixedIdolId);
 
   if (!repairedResult) {
     return Response.json(
