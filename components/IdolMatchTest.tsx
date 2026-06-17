@@ -899,6 +899,19 @@ export function IdolMatchTest() {
                       <li key={reason}>{reason}</li>
                     ))}
                   </ul>
+                  <div className="entry-path-inline">
+                    <p className="section-kicker">ENTRY PATH</p>
+                    <div className="entry-card-list">
+                      {entryPathCards.map((card) => (
+                        <article className="entry-card" key={card.step}>
+                          <span>{card.step}</span>
+                          <h3>{card.title}</h3>
+                          <strong>{card.action}</strong>
+                          <p>{card.detail}</p>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <aside>
@@ -930,19 +943,6 @@ export function IdolMatchTest() {
                         </div>
                       );
                     })}
-                  </div>
-                  <p className="section-kicker" style={{ marginTop: 22 }}>
-                    ENTRY PATH
-                  </p>
-                  <div className="entry-card-list">
-                    {entryPathCards.map((card) => (
-                      <article className="entry-card" key={card.step}>
-                        <span>{card.step}</span>
-                        <h3>{card.title}</h3>
-                        <strong>{card.action}</strong>
-                        <p>{card.detail}</p>
-                      </article>
-                    ))}
                   </div>
                 </aside>
               </div>

@@ -680,6 +680,10 @@ button:disabled {
   line-height: 1.6;
 }
 
+.entry-path-inline {
+  margin-top: 22px;
+}
+
 .explanation-actions {
   display: grid;
   justify-items: start;

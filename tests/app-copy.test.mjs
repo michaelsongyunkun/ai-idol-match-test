@@ -38,6 +38,7 @@ describe("app handoff copy", () => {
 
   it("surfaces result growth features for comparison, entry path, and history", () => {
     assert.match(componentSource, /displayTopMatches/);
+    assert.match(componentSource, /entry-path-inline/);
     assert.match(componentSource, /entry-card-list/);
     assert.match(componentSource, /收藏与历史/);
     assert.match(componentSource, /toggleCurrentFavorite/);
