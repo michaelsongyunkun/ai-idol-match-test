@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "export:experience-map": "node scripts/export-experience-match-map.mjs",
+    "export:professional-map": "node scripts/export-experience-match-map.mjs --mode professional --output-dir outputs/professional-match-map",
     "test": "node --test tests/*.test.ts tests/*.test.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

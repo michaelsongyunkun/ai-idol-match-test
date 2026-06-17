@@ -1,0 +1,19 @@
+{
+  "mode": "professional",
+  "questionCount": 40,
+  "choicesPerQuestion": 4,
+  "rawCombinationCount": "1208925819614629174706176",
+  "rawCombinationCountText": "1,208,925,819,614,629,174,706,176",
+  "idolCount": 120,
+  "dataMode": "rag",
+  "dataSource": "01-Projects/ai-idol-match-test-deploy/knowledge-base/年轻向全球idol资料清单_120plus.md",
+  "sampleRows": 4096,
+  "fullExportDisabledByDefault": true,
+  "reason": "40 questions with 4 choices each create 1,208,925,819,614,629,174,706,176 rows; use --signature for exact lookup instead of materializing the full table.",
+  "files": [
+    "question-options.csv",
+    "sample-match-map.csv",
+    "manifest.json",
+    "README.md"
+  ]
+}
