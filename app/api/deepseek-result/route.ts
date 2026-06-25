@@ -1,12 +1,12 @@
 import {
+  buildCompatibleApiUrl,
   buildDeepSeekMessages,
   buildDeepSeekRepairMessages,
-  deepSeekBaseUrl,
-  deepSeekResultModel,
   mapDeepSeekStatusToError,
-  parseApiKey,
+  parseCompatibleApiConfig,
   parseDeepSeekCandidates,
-  parseDeepSeekGeneratedResult
+  parseDeepSeekGeneratedResult,
+  type CompatibleApiConfig
 } from "../../../lib/deepseek.ts";
 
 export async function POST(request: Request) {
@@ -16,19 +16,22 @@ export async function POST(request: Request) {
     payload = await request.json();
   } catch {
     return Response.json(
-      { error: { code: "INVALID_JSON", message: "请求体不是有效 JSON。" } },
+      { error: { code: "INVALID_JSON", message: "Request body must be valid JSON." } },
       { status: 400 }
     );
   }
 
   const body = payload as {
+    provider?: unknown;
     apiKey?: unknown;
+    baseUrl?: unknown;
+    model?: unknown;
     modeName?: unknown;
     userTags?: unknown;
     candidates?: unknown;
     fixedIdolId?: unknown;
   };
-  const apiKey = parseApiKey(body.apiKey);
+  const parsedConfig = parseCompatibleApiConfig(body);
   const modeName = typeof body.modeName === "string" ? body.modeName : "";
   const userTags = Array.isArray(body.userTags)
     ? body.userTags.filter((tag): tag is string => typeof tag === "string").slice(0, 12)
@@ -36,23 +39,22 @@ export async function POST(request: Request) {
   const candidates = parseDeepSeekCandidates(body.candidates);
   const fixedIdolId = typeof body.fixedIdolId === "string" ? body.fixedIdolId.trim() : "";
 
-  if (!apiKey) {
-    return Response.json(
-      { error: { code: "MISSING_API_KEY", message: "请先连接 DeepSeek API Key。" } },
-      { status: 400 }
-    );
+  if (!parsedConfig.ok) {
+    return Response.json(parsedConfig.body, { status: parsedConfig.status });
   }
+
+  const { model } = parsedConfig.config;
 
   if (!modeName || candidates.length === 0 || !fixedIdolId || !candidates.some((candidate) => candidate.id === fixedIdolId)) {
     return Response.json(
-      { error: { code: "INVALID_MATCH_CONTEXT", message: "缺少固定匹配结果或可生成分析的候选上下文。" } },
+      { error: { code: "INVALID_MATCH_CONTEXT", message: "Missing fixed match context or candidate data." } },
       { status: 422 }
     );
   }
 
   const requestInput = { modeName, userTags, candidates, fixedIdolId };
   const firstAttempt = await requestDeepSeekCompletion({
-    apiKey,
+    config: parsedConfig.config,
     messages: buildDeepSeekMessages(requestInput),
     maxTokens: 2200
   });
@@ -66,16 +68,16 @@ export async function POST(request: Request) {
   if (firstResult) {
     return Response.json({
       result: firstResult,
-      model: deepSeekResultModel,
+      model,
       usage: firstAttempt.usage,
       repaired: false
     });
   }
 
   const repairAttempt = await requestDeepSeekCompletion({
-    apiKey,
+    config: parsedConfig.config,
     messages: buildDeepSeekRepairMessages(requestInput, firstAttempt.content, [
-      "第一次结果内容过短、字段不完整，或 idolId 没有等于固定答案，未通过后端质量校验。"
+      "The first result was too sparse, incomplete, or did not keep the fixed idolId."
     ]),
     maxTokens: 2600
   });
@@ -88,51 +90,40 @@ export async function POST(request: Request) {
 
   if (!repairedResult) {
     return Response.json(
-      { error: { code: "DEEPSEEK_INVALID_RESULT", message: "DeepSeek 返回结果内容仍然过短，请重新生成。" } },
+      { error: { code: "COMPATIBLE_API_INVALID_RESULT", message: "The model returned an invalid or incomplete result." } },
       { status: 502 }
     );
   }
 
   return Response.json({
     result: repairedResult,
-    model: deepSeekResultModel,
+    model,
     usage: repairAttempt.usage,
     repaired: true
   });
 }
 
 async function requestDeepSeekCompletion({
-  apiKey,
+  config,
   messages,
   maxTokens
 }: {
-  apiKey: string;
+  config: CompatibleApiConfig;
   messages: Array<{ role: string; content: string }>;
   maxTokens: number;
 }): Promise<{ content: string; usage: unknown } | { error: Response }> {
   let deepSeekResponse: Response;
 
   try {
-    deepSeekResponse = await fetch(`${deepSeekBaseUrl}/chat/completions`, {
+    deepSeekResponse = await fetch(buildCompletionUrl(config), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: deepSeekResultModel,
-        messages,
-        response_format: { type: "json_object" },
-        thinking: { type: "disabled" },
-        temperature: 0.55,
-        max_tokens: maxTokens,
-        stream: false
-      })
+      headers: buildCompletionHeaders(config),
+      body: JSON.stringify(buildCompletionBody(config, messages, maxTokens))
     });
   } catch {
     return {
       error: Response.json(
-        { error: { code: "DEEPSEEK_NETWORK_ERROR", message: "无法连接 DeepSeek API。" } },
+        { error: { code: "COMPATIBLE_API_NETWORK_ERROR", message: "Unable to reach the selected model API." } },
         { status: 502 }
       )
     };
@@ -146,16 +137,13 @@ async function requestDeepSeekCompletion({
     };
   }
 
-  const completion = (await deepSeekResponse.json()) as {
-    choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
-    usage?: unknown;
-  };
-  const content = completion.choices?.[0]?.message?.content;
+  const completion = await deepSeekResponse.json();
+  const content = extractCompletionText(completion, config.provider);
 
   if (!content) {
     return {
       error: Response.json(
-        { error: { code: "DEEPSEEK_EMPTY_RESULT", message: "DeepSeek 未返回可用结果。" } },
+        { error: { code: "COMPATIBLE_API_EMPTY_RESULT", message: "The selected model API returned no usable text." } },
         { status: 502 }
       )
     };
@@ -163,6 +151,136 @@ async function requestDeepSeekCompletion({
 
   return {
     content,
-    usage: completion.usage ?? null
+    usage: extractCompletionUsage(completion)
   };
+}
+
+function buildCompletionUrl({ provider, baseUrl, model }: CompatibleApiConfig) {
+  if (provider === "gemini") {
+    return buildCompatibleApiUrl(baseUrl, `/models/${model}:generateContent`);
+  }
+
+  if (provider === "anthropic") {
+    return buildCompatibleApiUrl(baseUrl, "/v1/messages");
+  }
+
+  return buildCompatibleApiUrl(baseUrl, "/chat/completions");
+}
+
+function buildCompletionHeaders({ provider, apiKey }: CompatibleApiConfig): Record<string, string> {
+  if (provider === "gemini") {
+    return {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey
+    };
+  }
+
+  if (provider === "anthropic") {
+    return {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01"
+    };
+  }
+
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`
+  };
+}
+
+function buildCompletionBody(
+  { provider, model }: CompatibleApiConfig,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number
+) {
+  if (provider === "gemini") {
+    const { system, user } = splitSystemAndUserMessages(messages);
+
+    return {
+      system_instruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: user }] }],
+      generationConfig: {
+        temperature: 0.55,
+        maxOutputTokens: maxTokens,
+        responseFormat: { text: { mimeType: "application/json" } }
+      }
+    };
+  }
+
+  if (provider === "anthropic") {
+    const { system, user } = splitSystemAndUserMessages(messages);
+
+    return {
+      model,
+      system,
+      messages: [{ role: "user", content: user }],
+      max_tokens: maxTokens,
+      temperature: 0.55
+    };
+  }
+
+  return {
+    model,
+    messages,
+    response_format: { type: "json_object" },
+    temperature: 0.55,
+    max_tokens: maxTokens,
+    stream: false
+  };
+}
+
+function splitSystemAndUserMessages(messages: Array<{ role: string; content: string }>) {
+  const system = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  const user = messages
+    .filter((message) => message.role !== "system")
+    .map((message) => message.content)
+    .join("\n\n");
+
+  return { system, user };
+}
+
+function extractCompletionText(value: unknown, provider: CompatibleApiConfig["provider"]) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const body = value as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
+    content?: Array<{ type?: unknown; text?: unknown }>;
+  };
+
+  if (provider === "gemini") {
+    return Array.isArray(body.candidates)
+      ? (body.candidates[0]?.content?.parts
+          ?.map((part) => (typeof part.text === "string" ? part.text : ""))
+          .join("")
+          .trim() ?? "")
+      : "";
+  }
+
+  if (provider === "anthropic") {
+    return Array.isArray(body.content)
+      ? body.content
+          .map((part) => (typeof part.text === "string" ? part.text : ""))
+          .join("")
+          .trim()
+      : "";
+  }
+
+  const content = body.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content : "";
+}
+
+function extractCompletionUsage(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const body = value as { usage?: unknown; usageMetadata?: unknown };
+  return body.usage ?? body.usageMetadata ?? null;
 }

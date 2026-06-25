@@ -30,10 +30,25 @@ describe("app handoff copy", () => {
     assert.match(componentSource, /share-poster/);
   });
 
-  it("requires DeepSeek API connection before starting the quiz", () => {
+  it("requires compatible API connection before starting the quiz", () => {
     assert.match(componentSource, /deepSeekApiKey/);
     assert.match(componentSource, /connectDeepSeek/);
     assert.match(componentSource, /disabled=\{!isDeepSeekConnected\}/);
+  });
+
+  it("lets users choose GPT-compatible, Gemini, or Anthropic providers", () => {
+    assert.match(componentSource, /aiProviderOptions/);
+    assert.match(componentSource, /GPT \/ OpenAI-compatible/);
+    assert.match(componentSource, /compatible-api-provider/);
+    assert.match(componentSource, /provider:\s*aiProvider/);
+  });
+
+  it("lets users choose Base URL and model presets while keeping custom values", () => {
+    assert.match(componentSource, /compatible-api-base-url-preset/);
+    assert.match(componentSource, /compatible-api-model-preset/);
+    assert.match(componentSource, /customApiPresetId/);
+    assert.match(componentSource, /自定义 Base URL/);
+    assert.match(componentSource, /自定义模型/);
   });
 
   it("surfaces result growth features for comparison, entry path, and history", () => {
@@ -44,9 +59,9 @@ describe("app handoff copy", () => {
     assert.match(componentSource, /toggleCurrentFavorite/);
   });
 
-  it("locks the idol match locally and uses DeepSeek for analysis copy", () => {
+  it("locks the idol match locally and uses compatible API for analysis copy", () => {
     assert.match(componentSource, /generateDeepSeekMatchResult/);
-    assert.match(componentSource, /api\/deepseek-result/);
+    assert.match(componentSource, /api\/compatible-result/);
     assert.match(componentSource, /fixedIdolId/);
     assert.match(componentSource, /固定匹配/);
   });

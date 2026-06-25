@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
-import { POST as connectPost } from "../app/api/deepseek-connect/route.ts";
-import { POST as resultPost } from "../app/api/deepseek-result/route.ts";
+import { POST as legacyConnectPost } from "../app/api/deepseek-connect/route.ts";
+import { POST as legacyResultPost } from "../app/api/deepseek-result/route.ts";
+import { POST as connectPost } from "../app/api/compatible-connect/route.ts";
+import { POST as resultPost } from "../app/api/compatible-result/route.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -40,38 +42,116 @@ const richGeneratedContent = (idolId = "idol-a") =>
     ]
   });
 
-describe("DeepSeek API routes", () => {
-  it("validates a user-supplied API key through the models endpoint", async () => {
+describe("Compatible API routes", () => {
+  it("validates a user-supplied compatible API key through the models endpoint", async () => {
+    let requestUrl = "";
     let authorization = "";
-    globalThis.fetch = (async (_url, init) => {
+    globalThis.fetch = (async (url, init) => {
+      requestUrl = String(url);
       authorization = String(init?.headers ? (init.headers as Record<string, string>).Authorization : "");
       return Response.json({
         object: "list",
-        data: [{ id: "deepseek-v4-flash", object: "model", owned_by: "deepseek" }]
+        data: [{ id: "provider-model", object: "model", owned_by: "compatible-provider" }]
       });
     }) as typeof fetch;
 
     const response = await connectPost(
-      new Request("http://localhost/api/deepseek-connect", {
+      new Request("http://localhost/api/compatible-connect", {
         method: "POST",
-        body: JSON.stringify({ apiKey: "sk-test" })
+        body: JSON.stringify({
+          apiKey: "sk-test",
+          baseUrl: "https://compatible.example/v1/",
+          model: "provider-model"
+        })
       })
     );
-    const payload = (await response.json()) as { connected?: boolean; model?: string; apiKey?: string };
+    const payload = (await response.json()) as { connected?: boolean; baseUrl?: string; model?: string; apiKey?: string };
 
     assert.equal(response.status, 200);
     assert.equal(payload.connected, true);
-    assert.equal(payload.model, "deepseek-v4-flash");
+    assert.equal(payload.baseUrl, "https://compatible.example/v1");
+    assert.equal(payload.model, "provider-model");
     assert.equal(payload.apiKey, undefined);
+    assert.equal(requestUrl, "https://compatible.example/v1/models");
     assert.equal(authorization, "Bearer sk-test");
   });
 
-  it("maps DeepSeek authentication failures without exposing the key", async () => {
+  it("validates Gemini API keys through the Gemini models endpoint", async () => {
+    let requestUrl = "";
+    let apiKeyHeader = "";
+    globalThis.fetch = (async (url, init) => {
+      requestUrl = String(url);
+      apiKeyHeader = String(init?.headers ? (init.headers as Record<string, string>)["x-goog-api-key"] : "");
+      return Response.json({
+        models: [{ name: "models/gemini-3.5-flash" }, { name: "models/gemini-3.5-pro" }]
+      });
+    }) as typeof fetch;
+
+    const response = await connectPost(
+      new Request("http://localhost/api/compatible-connect", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "gemini",
+          apiKey: "gemini-key",
+          model: "gemini-3.5-flash"
+        })
+      })
+    );
+    const payload = (await response.json()) as { connected?: boolean; provider?: string; baseUrl?: string; model?: string; apiKey?: string };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.connected, true);
+    assert.equal(payload.provider, "gemini");
+    assert.equal(payload.baseUrl, "https://generativelanguage.googleapis.com/v1beta");
+    assert.equal(payload.model, "gemini-3.5-flash");
+    assert.equal(payload.apiKey, undefined);
+    assert.equal(requestUrl, "https://generativelanguage.googleapis.com/v1beta/models");
+    assert.equal(apiKeyHeader, "gemini-key");
+  });
+
+  it("validates Anthropic API keys through the Claude models endpoint", async () => {
+    let requestUrl = "";
+    let apiKeyHeader = "";
+    let versionHeader = "";
+    globalThis.fetch = (async (url, init) => {
+      requestUrl = String(url);
+      const headers = init?.headers as Record<string, string>;
+      apiKeyHeader = String(headers["x-api-key"] ?? "");
+      versionHeader = String(headers["anthropic-version"] ?? "");
+      return Response.json({
+        data: [{ id: "claude-sonnet-4-6" }, { id: "claude-opus-4-6" }]
+      });
+    }) as typeof fetch;
+
+    const response = await connectPost(
+      new Request("http://localhost/api/compatible-connect", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "anthropic",
+          apiKey: "claude-key",
+          model: "claude-sonnet-4-6"
+        })
+      })
+    );
+    const payload = (await response.json()) as { connected?: boolean; provider?: string; baseUrl?: string; model?: string; apiKey?: string };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.connected, true);
+    assert.equal(payload.provider, "anthropic");
+    assert.equal(payload.baseUrl, "https://api.anthropic.com");
+    assert.equal(payload.model, "claude-sonnet-4-6");
+    assert.equal(payload.apiKey, undefined);
+    assert.equal(requestUrl, "https://api.anthropic.com/v1/models");
+    assert.equal(apiKeyHeader, "claude-key");
+    assert.equal(versionHeader, "2023-06-01");
+  });
+
+  it("maps compatible API authentication failures without exposing the key", async () => {
     globalThis.fetch = (async () =>
       Response.json({ error: { message: "bad key" } }, { status: 401 })) as typeof fetch;
 
     const response = await connectPost(
-      new Request("http://localhost/api/deepseek-connect", {
+      new Request("http://localhost/api/compatible-connect", {
         method: "POST",
         body: JSON.stringify({ apiKey: "sk-bad" })
       })
@@ -79,17 +159,17 @@ describe("DeepSeek API routes", () => {
     const payload = (await response.json()) as { error?: { code?: string }; apiKey?: string };
 
     assert.equal(response.status, 401);
-    assert.equal(payload.error?.code, "DEEPSEEK_AUTH_FAILED");
+    assert.equal(payload.error?.code, "COMPATIBLE_API_AUTH_FAILED");
     assert.equal(payload.apiKey, undefined);
   });
 
-  it("returns a structured error when DeepSeek cannot be reached", async () => {
+  it("returns a structured error when compatible API cannot be reached", async () => {
     globalThis.fetch = (async () => {
       throw new Error("network down");
     }) as typeof fetch;
 
     const response = await connectPost(
-      new Request("http://localhost/api/deepseek-connect", {
+      new Request("http://localhost/api/compatible-connect", {
         method: "POST",
         body: JSON.stringify({ apiKey: "sk-test" })
       })
@@ -97,13 +177,15 @@ describe("DeepSeek API routes", () => {
     const payload = (await response.json()) as { error?: { code?: string; message?: string } };
 
     assert.equal(response.status, 502);
-    assert.equal(payload.error?.code, "DEEPSEEK_NETWORK_ERROR");
+    assert.equal(payload.error?.code, "COMPATIBLE_API_NETWORK_ERROR");
     assert.doesNotMatch(payload.error?.message ?? "", /network down/);
   });
 
-  it("generates a structured result through DeepSeek chat completions", async () => {
+  it("generates a structured result through GPT-compatible chat completions", async () => {
+    let requestUrl = "";
     let requestBody = "";
-    globalThis.fetch = (async (_url, init) => {
+    globalThis.fetch = (async (url, init) => {
+      requestUrl = String(url);
       requestBody = String(init?.body ?? "");
       return Response.json({
         choices: [
@@ -121,10 +203,12 @@ describe("DeepSeek API routes", () => {
     }) as typeof fetch;
 
     const response = await resultPost(
-      new Request("http://localhost/api/deepseek-result", {
+      new Request("http://localhost/api/compatible-result", {
         method: "POST",
         body: JSON.stringify({
           apiKey: "sk-test",
+          baseUrl: "https://api.openai.com/v1/",
+          model: "gpt-compatible-model",
           modeName: "体验版",
           userTags: ["舞台型"],
           fixedIdolId: "idol-a",
@@ -152,6 +236,7 @@ describe("DeepSeek API routes", () => {
       response_format?: { type?: string };
       model?: string;
       messages?: Array<{ content: string }>;
+      thinking?: unknown;
     };
 
     assert.equal(response.status, 200);
@@ -159,10 +244,139 @@ describe("DeepSeek API routes", () => {
     assert.ok((payload.result?.summary ?? "").length >= 60);
     assert.equal(payload.result?.reasons?.length, 4);
     assert.equal(payload.repaired, false);
-    assert.equal(deepSeekRequest.model, "deepseek-v4-flash");
+    assert.equal(requestUrl, "https://api.openai.com/v1/chat/completions");
+    assert.equal(deepSeekRequest.model, "gpt-compatible-model");
     assert.equal(deepSeekRequest.response_format?.type, "json_object");
+    assert.equal("thinking" in deepSeekRequest, false);
     assert.match(deepSeekRequest.messages?.[0]?.content ?? "", /JSON/);
     assert.match(deepSeekRequest.messages?.[0]?.content ?? "", /固定值：idol-a/);
+  });
+
+  it("generates a structured result through Gemini generateContent", async () => {
+    let requestUrl = "";
+    let requestBody = "";
+    let apiKeyHeader = "";
+    globalThis.fetch = (async (url, init) => {
+      requestUrl = String(url);
+      requestBody = String(init?.body ?? "");
+      apiKeyHeader = String(init?.headers ? (init.headers as Record<string, string>)["x-goog-api-key"] : "");
+      return Response.json({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: richGeneratedContent() }]
+            }
+          }
+        ],
+        usageMetadata: { totalTokenCount: 321 }
+      });
+    }) as typeof fetch;
+
+    const response = await resultPost(
+      new Request("http://localhost/api/compatible-result", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "gemini",
+          apiKey: "gemini-key",
+          model: "gemini-3.5-flash",
+          modeName: "mode",
+          userTags: ["tag"],
+          fixedIdolId: "idol-a",
+          candidates: [
+            {
+              id: "idol-a",
+              name: "idol a",
+              summary: "summary",
+              score: 88,
+              confidence: 80,
+              tags: ["tag"],
+              matchedTags: ["tag"],
+              entryReasons: ["reason"],
+              dimensionScores: [{ label: "stage", score: 8, matchedTags: ["tag"] }]
+            }
+          ]
+        })
+      })
+    );
+    const payload = (await response.json()) as { result?: { idolId?: string }; model?: string };
+    const geminiRequest = JSON.parse(requestBody) as {
+      system_instruction?: { parts?: Array<{ text?: string }> };
+      contents?: Array<{ parts?: Array<{ text?: string }> }>;
+      generationConfig?: { responseFormat?: { text?: { mimeType?: string } }; maxOutputTokens?: number };
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.result?.idolId, "idol-a");
+    assert.equal(payload.model, "gemini-3.5-flash");
+    assert.equal(requestUrl, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent");
+    assert.equal(apiKeyHeader, "gemini-key");
+    assert.match(geminiRequest.system_instruction?.parts?.[0]?.text ?? "", /JSON/);
+    assert.match(geminiRequest.contents?.[0]?.parts?.[0]?.text ?? "", /fixedIdolId|idol-a/);
+    assert.equal(geminiRequest.generationConfig?.responseFormat?.text?.mimeType, "application/json");
+    assert.equal(geminiRequest.generationConfig?.maxOutputTokens, 2200);
+  });
+
+  it("generates a structured result through Anthropic messages", async () => {
+    let requestUrl = "";
+    let requestBody = "";
+    let apiKeyHeader = "";
+    let versionHeader = "";
+    globalThis.fetch = (async (url, init) => {
+      requestUrl = String(url);
+      requestBody = String(init?.body ?? "");
+      const headers = init?.headers as Record<string, string>;
+      apiKeyHeader = String(headers["x-api-key"] ?? "");
+      versionHeader = String(headers["anthropic-version"] ?? "");
+      return Response.json({
+        content: [{ type: "text", text: richGeneratedContent() }],
+        usage: { input_tokens: 111, output_tokens: 222 }
+      });
+    }) as typeof fetch;
+
+    const response = await resultPost(
+      new Request("http://localhost/api/compatible-result", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "anthropic",
+          apiKey: "claude-key",
+          model: "claude-sonnet-4-6",
+          modeName: "mode",
+          userTags: ["tag"],
+          fixedIdolId: "idol-a",
+          candidates: [
+            {
+              id: "idol-a",
+              name: "idol a",
+              summary: "summary",
+              score: 88,
+              confidence: 80,
+              tags: ["tag"],
+              matchedTags: ["tag"],
+              entryReasons: ["reason"],
+              dimensionScores: [{ label: "stage", score: 8, matchedTags: ["tag"] }]
+            }
+          ]
+        })
+      })
+    );
+    const payload = (await response.json()) as { result?: { idolId?: string }; model?: string };
+    const claudeRequest = JSON.parse(requestBody) as {
+      model?: string;
+      system?: string;
+      max_tokens?: number;
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.result?.idolId, "idol-a");
+    assert.equal(payload.model, "claude-sonnet-4-6");
+    assert.equal(requestUrl, "https://api.anthropic.com/v1/messages");
+    assert.equal(apiKeyHeader, "claude-key");
+    assert.equal(versionHeader, "2023-06-01");
+    assert.equal(claudeRequest.model, "claude-sonnet-4-6");
+    assert.equal(claudeRequest.max_tokens, 2200);
+    assert.match(claudeRequest.system ?? "", /JSON/);
+    assert.match(claudeRequest.messages?.[0]?.content ?? "", /fixedIdolId|idol-a/);
   });
 
   it("retries once when the first DeepSeek result is too sparse", async () => {
@@ -196,10 +410,12 @@ describe("DeepSeek API routes", () => {
     }) as typeof fetch;
 
     const response = await resultPost(
-      new Request("http://localhost/api/deepseek-result", {
+      new Request("http://localhost/api/compatible-result", {
         method: "POST",
         body: JSON.stringify({
           apiKey: "sk-test",
+          baseUrl: "https://compatible.example/v1/",
+          model: "provider-model",
           modeName: "体验版",
           userTags: ["舞台型"],
           fixedIdolId: "idol-a",
@@ -252,10 +468,12 @@ describe("DeepSeek API routes", () => {
     }) as typeof fetch;
 
     const response = await resultPost(
-      new Request("http://localhost/api/deepseek-result", {
+      new Request("http://localhost/api/compatible-result", {
         method: "POST",
         body: JSON.stringify({
           apiKey: "sk-test",
+          baseUrl: "https://compatible.example/v1/",
+          model: "provider-model",
           modeName: "体验版",
           userTags: ["舞台型"],
           fixedIdolId: "idol-a",
@@ -285,5 +503,47 @@ describe("DeepSeek API routes", () => {
     assert.equal(calls, 2);
     assert.equal(payload.repaired, true);
     assert.equal(payload.result?.idolId, "idol-a");
+  });
+
+  it("keeps legacy DeepSeek route aliases available", async () => {
+    globalThis.fetch = (async (url) =>
+      String(url).endsWith("/models")
+        ? Response.json({ object: "list", data: [{ id: "provider-model" }] })
+        : Response.json({ choices: [{ message: { content: richGeneratedContent() } }] })) as typeof fetch;
+
+    const connectResponse = await legacyConnectPost(
+      new Request("http://localhost/api/deepseek-connect", {
+        method: "POST",
+        body: JSON.stringify({ apiKey: "sk-test", model: "provider-model" })
+      })
+    );
+    const resultResponse = await legacyResultPost(
+      new Request("http://localhost/api/deepseek-result", {
+        method: "POST",
+        body: JSON.stringify({
+          apiKey: "sk-test",
+          model: "provider-model",
+          modeName: "mode",
+          userTags: ["tag"],
+          fixedIdolId: "idol-a",
+          candidates: [
+            {
+              id: "idol-a",
+              name: "idol a",
+              summary: "summary",
+              score: 88,
+              confidence: 80,
+              tags: ["tag"],
+              matchedTags: ["tag"],
+              entryReasons: ["reason"],
+              dimensionScores: [{ label: "stage", score: 8, matchedTags: ["tag"] }]
+            }
+          ]
+        })
+      })
+    );
+
+    assert.equal(connectResponse.status, 200);
+    assert.equal(resultResponse.status, 200);
   });
 });

@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  aiProviderOptions,
+  buildCompatibleApiUrl,
   buildDeepSeekMessages,
   buildDeepSeekRepairMessages,
+  customApiPresetId,
   mapDeepSeekStatusToError,
+  parseCompatibleApiBaseUrl,
+  parseCompatibleApiConfig,
   parseDeepSeekCandidates,
   parseDeepSeekGeneratedResult,
   type DeepSeekCandidate
@@ -109,15 +114,83 @@ describe("DeepSeek result contract", () => {
     assert.equal(parseDeepSeekGeneratedResult(JSON.stringify({ idolId: "idol-b" }), candidates, "idol-a"), null);
   });
 
-  it("sanitizes candidates and maps common DeepSeek error statuses", () => {
+  it("sanitizes candidates and maps common compatible API error statuses", () => {
     const parsed = parseDeepSeekCandidates([
       { id: "idol-a", name: "测试爱豆 A", score: 88, confidence: 77, tags: ["舞台型"] },
       { id: "", name: "bad" }
     ]);
 
     assert.equal(parsed.length, 1);
-    assert.equal(mapDeepSeekStatusToError(401).error.code, "DEEPSEEK_AUTH_FAILED");
-    assert.equal(mapDeepSeekStatusToError(402).error.code, "DEEPSEEK_INSUFFICIENT_BALANCE");
-    assert.equal(mapDeepSeekStatusToError(429).error.code, "DEEPSEEK_RATE_LIMITED");
+    assert.equal(mapDeepSeekStatusToError(401).error.code, "COMPATIBLE_API_AUTH_FAILED");
+    assert.equal(mapDeepSeekStatusToError(402).error.code, "COMPATIBLE_API_INSUFFICIENT_BALANCE");
+    assert.equal(mapDeepSeekStatusToError(429).error.code, "COMPATIBLE_API_RATE_LIMITED");
+  });
+
+  it("normalizes OpenAI-compatible API config", () => {
+    assert.equal(parseCompatibleApiBaseUrl("https://example.com/v1/"), "https://example.com/v1");
+    assert.equal(parseCompatibleApiBaseUrl("http://example.com/v1"), "");
+    assert.equal(buildCompatibleApiUrl("https://example.com/v1", "/chat/completions"), "https://example.com/v1/chat/completions");
+
+    const parsed = parseCompatibleApiConfig({
+      apiKey: " sk-test ",
+      baseUrl: "https://example.com/v1/",
+      model: " provider/model "
+    });
+
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) {
+      assert.equal(parsed.config.apiKey, "sk-test");
+      assert.equal(parsed.config.baseUrl, "https://example.com/v1");
+      assert.equal(parsed.config.model, "provider/model");
+    }
+  });
+
+  it("normalizes Gemini and Anthropic provider config with provider defaults", () => {
+    const gemini = parseCompatibleApiConfig({
+      provider: "gemini",
+      apiKey: " gemini-key ",
+      model: ""
+    });
+    const anthropic = parseCompatibleApiConfig({
+      provider: "anthropic",
+      apiKey: " claude-key ",
+      baseUrl: "",
+      model: ""
+    });
+
+    assert.equal(gemini.ok, true);
+    if (gemini.ok) {
+      assert.equal(gemini.config.provider, "gemini");
+      assert.equal(gemini.config.baseUrl, "https://generativelanguage.googleapis.com/v1beta");
+      assert.match(gemini.config.model, /^gemini-/);
+    }
+
+    assert.equal(anthropic.ok, true);
+    if (anthropic.ok) {
+      assert.equal(anthropic.config.provider, "anthropic");
+      assert.equal(anthropic.config.baseUrl, "https://api.anthropic.com");
+      assert.match(anthropic.config.model, /^claude-/);
+    }
+  });
+
+  it("keeps selectable Base URL and model presets aligned with provider defaults", () => {
+    assert.equal(customApiPresetId, "custom");
+
+    for (const provider of aiProviderOptions) {
+      assert.ok(
+        provider.baseUrlOptions.some((option) => option.value === provider.defaultBaseUrl),
+        `${provider.id} Base URL presets should include the default Base URL`
+      );
+      assert.ok(
+        provider.modelOptions.some((option) => option.value === provider.defaultModel),
+        `${provider.id} model presets should include the default model`
+      );
+    }
+
+    assert.ok(
+      aiProviderOptions
+        .find((provider) => provider.id === "openai-compatible")
+        ?.baseUrlOptions.some((option) => option.value === "https://api.openai.com/v1")
+    );
   });
 });

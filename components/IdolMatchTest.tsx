@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { idolDataBundle } from "@/data/idol-profiles.generated";
-import type { DeepSeekCandidate, DeepSeekGeneratedResult } from "@/lib/deepseek";
+import {
+  aiProviderOptions,
+  compatibleApiDefaultBaseUrl,
+  compatibleApiDefaultModel,
+  compatibleApiDefaultProvider,
+  customApiPresetId,
+  type ApiPresetOption,
+  type AiProvider,
+  type DeepSeekCandidate,
+  type DeepSeekGeneratedResult
+} from "@/lib/deepseek";
 import { buildUserPreferenceProfile, getTopUserTags, matchIdols } from "@/lib/matcher";
 import {
   getQuizQuestionsForMode,
@@ -126,6 +136,12 @@ const buildDeepSeekCandidates = (matches: MatchResult[]): DeepSeekCandidate[] =>
     dimensionScores: match.dimensionScores
   }));
 
+const getAiProviderOption = (provider: AiProvider) =>
+  aiProviderOptions.find((option) => option.id === provider) ?? aiProviderOptions[0];
+
+const getPresetIdForValue = (options: ApiPresetOption[], value: string) =>
+  options.find((option) => option.value === value)?.id ?? customApiPresetId;
+
 export function IdolMatchTest() {
   const [screen, setScreen] = useState<Screen>("start");
   const [mode, setMode] = useState<QuizModeId>("experience");
@@ -133,14 +149,26 @@ export function IdolMatchTest() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [matchHistory, setMatchHistory] = useState<MatchHistoryRecord[]>([]);
+  const [aiProvider, setAiProvider] = useState<AiProvider>(compatibleApiDefaultProvider);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
+  const [compatibleApiBaseUrl, setCompatibleApiBaseUrl] = useState(compatibleApiDefaultBaseUrl);
+  const [compatibleApiModel, setCompatibleApiModel] = useState(compatibleApiDefaultModel);
+  const [baseUrlPresetId, setBaseUrlPresetId] = useState(() =>
+    getPresetIdForValue(getAiProviderOption(compatibleApiDefaultProvider).baseUrlOptions, compatibleApiDefaultBaseUrl)
+  );
+  const [modelPresetId, setModelPresetId] = useState(() =>
+    getPresetIdForValue(getAiProviderOption(compatibleApiDefaultProvider).modelOptions, compatibleApiDefaultModel)
+  );
   const [deepSeekConnectionStatus, setDeepSeekConnectionStatus] =
     useState<DeepSeekConnectionStatus>("idle");
-  const [deepSeekMessage, setDeepSeekMessage] = useState("连接 DeepSeek API 后才能开始测评。");
+  const [deepSeekMessage, setDeepSeekMessage] = useState("连接兼容 API 后才能开始测评。");
   const [deepSeekResult, setDeepSeekResult] = useState<DeepSeekGeneratedResult | null>(null);
   const [deepSeekResultStatus, setDeepSeekResultStatus] = useState<DeepSeekResultStatus>("idle");
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [posterStatus, setPosterStatus] = useState<"idle" | "saved" | "failed">("idle");
+  const activeAiProvider = getAiProviderOption(aiProvider);
+  const selectedBaseUrlIsCustom = baseUrlPresetId === customApiPresetId;
+  const selectedModelIsCustom = modelPresetId === customApiPresetId;
 
   const activeQuestions = useMemo(() => getQuizQuestionsForMode(mode), [mode]);
   const activeMode = quizModes[mode];
@@ -185,7 +213,11 @@ export function IdolMatchTest() {
   );
   const visibleHistory = matchHistory.slice(0, 5);
   const favoriteCount = matchHistory.filter((record) => record.favorite).length;
-  const isDeepSeekConnected = deepSeekConnectionStatus === "connected" && deepSeekApiKey.trim().length > 0;
+  const isDeepSeekConnected =
+    deepSeekConnectionStatus === "connected" &&
+    deepSeekApiKey.trim().length > 0 &&
+    compatibleApiBaseUrl.trim().length > 0 &&
+    compatibleApiModel.trim().length > 0;
   const resultSummary = deepSeekResult?.summary || topMatch?.idol.summary || "";
   const displayTopMatches = useMemo(() => {
     if (!deepSeekResult) {
@@ -200,8 +232,8 @@ export function IdolMatchTest() {
         difference:
           generated?.difference ??
           (index === 0
-            ? "这是固定答案表命中的第一名，DeepSeek 只补充分析，不改变匹配对象。"
-            : "这是固定匹配排序中的备选结果，DeepSeek 未返回额外差异说明。")
+            ? "这是固定答案表命中的第一名，兼容模型只补充分析，不改变匹配对象。"
+            : "这是固定匹配排序中的备选结果，兼容模型未返回额外差异说明。")
       };
     });
   }, [deepSeekResult, matches]);
@@ -292,47 +324,76 @@ export function IdolMatchTest() {
   }, [activeMode.name, answerSignature, hydrated, mode, screen, topMatch]);
 
   const connectDeepSeek = async () => {
-    const apiKey = deepSeekApiKey.trim();
+    const apiConfig = {
+      provider: aiProvider,
+      apiKey: deepSeekApiKey.trim(),
+      baseUrl: compatibleApiBaseUrl.trim(),
+      model: compatibleApiModel.trim()
+    };
 
-    if (!apiKey) {
+    if (!apiConfig.apiKey) {
       setDeepSeekConnectionStatus("failed");
-      setDeepSeekMessage("请先填写 DeepSeek API Key。");
+      setDeepSeekMessage("请先填写兼容 API Key。");
+      return;
+    }
+
+    if (!apiConfig.baseUrl || !apiConfig.model) {
+      setDeepSeekConnectionStatus("failed");
+      setDeepSeekMessage("请填写兼容 API Base URL 和模型名。");
       return;
     }
 
     setDeepSeekConnectionStatus("validating");
-    setDeepSeekMessage("正在校验 DeepSeek API Key...");
+    setDeepSeekMessage("正在校验兼容 API Key...");
 
     try {
-      const response = await fetch("/api/deepseek-connect", {
+      const response = await fetch("/api/compatible-connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey })
+        body: JSON.stringify(apiConfig)
       });
       const payload = (await response.json()) as {
         connected?: boolean;
+        provider?: AiProvider;
+        baseUrl?: string;
         model?: string;
         error?: { message?: string };
       };
 
       if (!response.ok || !payload.connected) {
         setDeepSeekConnectionStatus("failed");
-        setDeepSeekMessage(payload.error?.message ?? "DeepSeek API 连接失败。");
+        setDeepSeekMessage(payload.error?.message ?? "兼容 API 连接失败。");
         return;
       }
 
+      const connectedProvider = payload.provider ?? aiProvider;
+      const connectedProviderOption = getAiProviderOption(connectedProvider);
+      const connectedBaseUrl = payload.baseUrl ?? compatibleApiBaseUrl;
+      const connectedModel = payload.model ?? compatibleApiModel;
+
+      if (payload.provider) {
+        setAiProvider(payload.provider);
+      }
+      if (payload.baseUrl) {
+        setCompatibleApiBaseUrl(payload.baseUrl);
+      }
+      if (payload.model) {
+        setCompatibleApiModel(payload.model);
+      }
+      setBaseUrlPresetId(getPresetIdForValue(connectedProviderOption.baseUrlOptions, connectedBaseUrl));
+      setModelPresetId(getPresetIdForValue(connectedProviderOption.modelOptions, connectedModel));
       setDeepSeekConnectionStatus("connected");
-      setDeepSeekMessage(`已连接 DeepSeek，匹配答案固定，分析将由 ${payload.model ?? "DeepSeek"} 生成。`);
+      setDeepSeekMessage(`已连接兼容 API，匹配答案固定，分析将由 ${payload.model ?? "当前模型"} 生成。`);
     } catch {
       setDeepSeekConnectionStatus("failed");
-      setDeepSeekMessage("无法连接 DeepSeek API，请检查网络或 API Key。");
+      setDeepSeekMessage("无法连接兼容 API，请检查网络、Base URL 或 API Key。");
     }
   };
 
   const generateDeepSeekMatchResult = async () => {
     if (!isDeepSeekConnected) {
       setDeepSeekConnectionStatus("failed");
-      setDeepSeekMessage("请先连接 DeepSeek API，才能开始或生成测评结果。");
+      setDeepSeekMessage("请先连接兼容 API，才能开始或生成测评结果。");
       setScreen("start");
       return;
     }
@@ -353,11 +414,14 @@ export function IdolMatchTest() {
     window.scrollTo({ top: 0, behavior: "smooth" });
 
     try {
-      const response = await fetch("/api/deepseek-result", {
+      const response = await fetch("/api/compatible-result", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          provider: aiProvider,
           apiKey: deepSeekApiKey.trim(),
+          baseUrl: compatibleApiBaseUrl.trim(),
+          model: compatibleApiModel.trim(),
           modeName: activeMode.name,
           userTags: topUserTags,
           fixedIdolId,
@@ -371,7 +435,7 @@ export function IdolMatchTest() {
 
       if (!response.ok || !payload.result) {
         setDeepSeekResultStatus("failed");
-        setDeepSeekMessage(payload.error?.message ?? "DeepSeek 未能生成测评结果。");
+        setDeepSeekMessage(payload.error?.message ?? "兼容 API 未能生成测评结果。");
         return;
       }
 
@@ -381,7 +445,7 @@ export function IdolMatchTest() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
       setDeepSeekResultStatus("failed");
-      setDeepSeekMessage("DeepSeek 生成失败，请检查网络或稍后重试。");
+      setDeepSeekMessage("兼容 API 生成失败，请检查网络或稍后重试。");
     }
   };
 
@@ -403,7 +467,7 @@ export function IdolMatchTest() {
 
     if (!isDeepSeekConnected) {
       setDeepSeekConnectionStatus("failed");
-      setDeepSeekMessage("请先连接 DeepSeek API，才能开始测评。");
+      setDeepSeekMessage("请先连接兼容 API，才能开始测评。");
       return;
     }
 
@@ -630,34 +694,151 @@ export function IdolMatchTest() {
         {screen === "start" && (
           <section className="api-connect-panel api-connect-panel--gate" data-status={deepSeekConnectionStatus}>
             <div>
-              <p className="section-kicker">DEEPSEEK API</p>
+              <p className="section-kicker">COMPATIBLE API</p>
               <label className="api-key-label" htmlFor="deepseek-api-key">
-                先连接 DeepSeek API Key 才能开始测评
+                先连接兼容 API（GPT、Gemini 或 Claude）才能开始测评
               </label>
-              <p className="small-muted">API Key 只用于本次页面会话，匹配爱豆固定，具体分析由 DeepSeek 生成。</p>
+              <p className="small-muted">
+                当前：{activeAiProvider.label}。API Key 只用于本次页面会话，匹配爱豆固定，具体分析由兼容模型生成。
+              </p>
+              <p className="small-muted">
+                可选 provider：GPT / OpenAI-compatible、Gemini、Anthropic Claude。
+              </p>
             </div>
-            <div className="api-key-row">
-              <input
-                id="deepseek-api-key"
-                className="api-key-input"
-                type="password"
-                autoComplete="off"
-                placeholder="sk-..."
-                value={deepSeekApiKey}
-                onChange={(event) => {
-                  setDeepSeekApiKey(event.target.value);
-                  setDeepSeekConnectionStatus("idle");
-                  setDeepSeekMessage("连接 DeepSeek API 后才能开始测评。");
-                }}
-              />
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={deepSeekConnectionStatus === "validating"}
-                onClick={connectDeepSeek}
-              >
-                {deepSeekConnectionStatus === "validating" ? "校验中" : "连接 API"}
-              </button>
+            <div className="api-form-stack">
+              <div className="api-key-row">
+                <input
+                  id="deepseek-api-key"
+                  className="api-key-input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="sk-..."
+                  value={deepSeekApiKey}
+                  onChange={(event) => {
+                    setDeepSeekApiKey(event.target.value);
+                    setDeepSeekConnectionStatus("idle");
+                    setDeepSeekMessage("连接兼容 API 后才能开始测评。");
+                  }}
+                />
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={deepSeekConnectionStatus === "validating"}
+                  onClick={connectDeepSeek}
+                >
+                  {deepSeekConnectionStatus === "validating" ? "校验中" : "连接 API"}
+                </button>
+              </div>
+              <div className="api-config-grid">
+                <label className="api-field" htmlFor="compatible-api-provider">
+                  <span>Provider</span>
+                  <select
+                    id="compatible-api-provider"
+                    className="api-key-input"
+                    value={aiProvider}
+                    onChange={(event) => {
+                      const nextProvider = event.target.value as AiProvider;
+                      const defaults = getAiProviderOption(nextProvider);
+
+                      setAiProvider(nextProvider);
+                      setCompatibleApiBaseUrl(defaults.defaultBaseUrl);
+                      setCompatibleApiModel(defaults.defaultModel);
+                      setBaseUrlPresetId(getPresetIdForValue(defaults.baseUrlOptions, defaults.defaultBaseUrl));
+                      setModelPresetId(getPresetIdForValue(defaults.modelOptions, defaults.defaultModel));
+                      setDeepSeekConnectionStatus("idle");
+                      setDeepSeekMessage(`连接 ${defaults.label} 后才能开始测评。`);
+                    }}
+                  >
+                    {aiProviderOptions.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="api-field" htmlFor="compatible-api-base-url-preset">
+                  <span>Base URL</span>
+                  <select
+                    id="compatible-api-base-url-preset"
+                    className="api-key-input"
+                    value={baseUrlPresetId}
+                    onChange={(event) => {
+                      const nextPresetId = event.target.value;
+                      const preset = activeAiProvider.baseUrlOptions.find((option) => option.id === nextPresetId);
+
+                      setBaseUrlPresetId(nextPresetId);
+                      if (preset) {
+                        setCompatibleApiBaseUrl(preset.value);
+                      }
+                      setDeepSeekConnectionStatus("idle");
+                      setDeepSeekMessage("连接兼容 API 后才能开始测评。");
+                    }}
+                  >
+                    {activeAiProvider.baseUrlOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                    <option value={customApiPresetId}>自定义</option>
+                  </select>
+                  {selectedBaseUrlIsCustom ? (
+                    <input
+                      id="compatible-api-base-url"
+                      className="api-key-input"
+                      type="url"
+                      autoComplete="off"
+                      aria-label="自定义 Base URL"
+                      value={compatibleApiBaseUrl}
+                      onChange={(event) => {
+                        setCompatibleApiBaseUrl(event.target.value);
+                        setDeepSeekConnectionStatus("idle");
+                        setDeepSeekMessage("连接兼容 API 后才能开始测评。");
+                      }}
+                    />
+                  ) : null}
+                </label>
+                <label className="api-field" htmlFor="compatible-api-model-preset">
+                  <span>模型</span>
+                  <select
+                    id="compatible-api-model-preset"
+                    className="api-key-input"
+                    value={modelPresetId}
+                    onChange={(event) => {
+                      const nextPresetId = event.target.value;
+                      const preset = activeAiProvider.modelOptions.find((option) => option.id === nextPresetId);
+
+                      setModelPresetId(nextPresetId);
+                      if (preset) {
+                        setCompatibleApiModel(preset.value);
+                      }
+                      setDeepSeekConnectionStatus("idle");
+                      setDeepSeekMessage("连接兼容 API 后才能开始测评。");
+                    }}
+                  >
+                    {activeAiProvider.modelOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                    <option value={customApiPresetId}>自定义</option>
+                  </select>
+                  {selectedModelIsCustom ? (
+                    <input
+                      id="compatible-api-model"
+                      className="api-key-input"
+                      type="text"
+                      autoComplete="off"
+                      aria-label="自定义模型"
+                      value={compatibleApiModel}
+                      onChange={(event) => {
+                        setCompatibleApiModel(event.target.value);
+                        setDeepSeekConnectionStatus("idle");
+                        setDeepSeekMessage("连接兼容 API 后才能开始测评。");
+                      }}
+                    />
+                  ) : null}
+                </label>
+              </div>
             </div>
             <p className="api-status">{deepSeekMessage}</p>
           </section>
@@ -824,14 +1005,14 @@ export function IdolMatchTest() {
 
         {screen === "generating" && (
           <section className="panel generating-panel">
-            <p className="section-kicker">DEEPSEEK RESULT</p>
+            <p className="section-kicker">AI RESULT</p>
             <h2 className="brand-title">
-              {deepSeekResultStatus === "failed" ? "DeepSeek 生成失败" : "DeepSeek 正在生成测评结果"}
+              {deepSeekResultStatus === "failed" ? "兼容 API 生成失败" : "兼容 API 正在生成测评结果"}
             </h2>
             <p className="hero-copy">
               {deepSeekResultStatus === "failed"
                 ? deepSeekMessage
-                : "正在把固定匹配结果和候选短名单发送给 DeepSeek，生成前不会展示分析兜底。"}
+                : "正在把固定匹配结果和候选短名单发送给兼容模型，生成前不会展示分析兜底。"}
             </p>
             <div className="start-actions">
               <button
@@ -854,7 +1035,7 @@ export function IdolMatchTest() {
             <article className="result-hero">
               <div className="result-top">
                 <div>
-                  <p className="idol-rank">TOP 1 · {activeMode.name} · 固定匹配 · DeepSeek 分析</p>
+                  <p className="idol-rank">TOP 1 · {activeMode.name} · 固定匹配 · AI 分析</p>
                   <h2 className="idol-name">{topMatch.idol.name}</h2>
                   <p className="idol-summary">{resultSummary}</p>
                   <div className="chip-cloud" style={{ marginTop: 16 }}>

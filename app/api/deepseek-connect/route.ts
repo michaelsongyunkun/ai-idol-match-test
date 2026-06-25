@@ -1,8 +1,8 @@
 import {
-  deepSeekBaseUrl,
-  deepSeekResultModel,
+  buildCompatibleApiUrl,
   mapDeepSeekStatusToError,
-  parseApiKey
+  parseCompatibleApiConfig,
+  type CompatibleApiConfig
 } from "../../../lib/deepseek.ts";
 
 export async function POST(request: Request) {
@@ -17,27 +17,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = parseApiKey((payload as { apiKey?: unknown }).apiKey);
+  const parsedConfig = parseCompatibleApiConfig(payload as { provider?: unknown; apiKey?: unknown; baseUrl?: unknown; model?: unknown });
 
-  if (!apiKey) {
-    return Response.json(
-      { error: { code: "MISSING_API_KEY", message: "请先填写 DeepSeek API Key。" } },
-      { status: 400 }
-    );
+  if (!parsedConfig.ok) {
+    return Response.json(parsedConfig.body, { status: parsedConfig.status });
   }
 
+  const { provider, baseUrl, model } = parsedConfig.config;
   let response: Response;
 
   try {
-    response = await fetch(`${deepSeekBaseUrl}/models`, {
+    response = await fetch(buildProviderModelsUrl(parsedConfig.config), {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${apiKey}`
-      }
+      headers: buildProviderAuthHeaders(parsedConfig.config)
     });
   } catch {
     return Response.json(
-      { error: { code: "DEEPSEEK_NETWORK_ERROR", message: "无法连接 DeepSeek API。" } },
+      { error: { code: "COMPATIBLE_API_NETWORK_ERROR", message: "无法连接兼容 API。" } },
       { status: 502 }
     );
   }
@@ -46,14 +42,60 @@ export async function POST(request: Request) {
     return Response.json(mapDeepSeekStatusToError(response.status), { status: response.status });
   }
 
-  const models = (await response.json()) as { data?: Array<{ id?: string }> };
-  const availableModels = Array.isArray(models.data)
-    ? models.data.map((model) => model.id).filter((id): id is string => Boolean(id))
-    : [];
+  const models = await response.json();
+  const availableModels = parseProviderModels(models, provider);
 
   return Response.json({
     connected: true,
-    model: availableModels.includes(deepSeekResultModel) ? deepSeekResultModel : availableModels[0] ?? deepSeekResultModel,
+    provider,
+    baseUrl,
+    model: availableModels.includes(model) ? model : availableModels[0] ?? model,
     availableModels
   });
+}
+
+function buildProviderModelsUrl({ provider, baseUrl }: CompatibleApiConfig) {
+  if (provider === "anthropic") {
+    return buildCompatibleApiUrl(baseUrl, "/v1/models");
+  }
+
+  return buildCompatibleApiUrl(baseUrl, "/models");
+}
+
+function buildProviderAuthHeaders({ provider, apiKey }: CompatibleApiConfig): Record<string, string> {
+  if (provider === "gemini") {
+    return { "x-goog-api-key": apiKey };
+  }
+
+  if (provider === "anthropic") {
+    return {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01"
+    };
+  }
+
+  return { Authorization: `Bearer ${apiKey}` };
+}
+
+function parseProviderModels(value: unknown, provider: CompatibleApiConfig["provider"]) {
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const body = value as {
+    data?: Array<{ id?: unknown }>;
+    models?: Array<{ name?: unknown }>;
+  };
+
+  if (provider === "gemini") {
+    return Array.isArray(body.models)
+      ? body.models
+          .map((model) => (typeof model.name === "string" ? model.name.replace(/^models\//, "") : ""))
+          .filter((id): id is string => Boolean(id))
+      : [];
+  }
+
+  return Array.isArray(body.data)
+    ? body.data.map((model) => model.id).filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
 }

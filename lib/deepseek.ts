@@ -1,7 +1,71 @@
 import type { DimensionScore } from "./types";
 
-export const deepSeekBaseUrl = "https://api.deepseek.com";
-export const deepSeekResultModel = "deepseek-v4-flash";
+export type AiProvider = "openai-compatible" | "gemini" | "anthropic";
+
+export const compatibleApiDefaultProvider: AiProvider = "openai-compatible";
+export const compatibleApiDefaultBaseUrl = "https://api.deepseek.com";
+export const compatibleApiDefaultModel = "deepseek-v4-flash";
+export const geminiDefaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta";
+export const geminiDefaultModel = "gemini-3.5-flash";
+export const anthropicDefaultBaseUrl = "https://api.anthropic.com";
+export const anthropicDefaultModel = "claude-sonnet-4-6";
+export const deepSeekBaseUrl = compatibleApiDefaultBaseUrl;
+export const deepSeekResultModel = compatibleApiDefaultModel;
+export const customApiPresetId = "custom";
+
+export type ApiPresetOption = {
+  id: string;
+  label: string;
+  value: string;
+};
+
+export type AiProviderOption = {
+  id: AiProvider;
+  label: string;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  baseUrlOptions: ApiPresetOption[];
+  modelOptions: ApiPresetOption[];
+};
+
+export const aiProviderOptions: AiProviderOption[] = [
+  {
+    id: "openai-compatible",
+    label: "GPT / OpenAI-compatible",
+    defaultBaseUrl: compatibleApiDefaultBaseUrl,
+    defaultModel: compatibleApiDefaultModel,
+    baseUrlOptions: [
+      { id: "deepseek", label: "DeepSeek 官方", value: compatibleApiDefaultBaseUrl },
+      { id: "openai", label: "OpenAI 官方", value: "https://api.openai.com/v1" }
+    ],
+    modelOptions: [
+      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", value: compatibleApiDefaultModel }
+    ]
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    defaultBaseUrl: geminiDefaultBaseUrl,
+    defaultModel: geminiDefaultModel,
+    baseUrlOptions: [{ id: "gemini-official", label: "Gemini 官方", value: geminiDefaultBaseUrl }],
+    modelOptions: [{ id: "gemini-3-5-flash", label: "Gemini 3.5 Flash", value: geminiDefaultModel }]
+  },
+  {
+    id: "anthropic",
+    label: "Anthropic Claude",
+    defaultBaseUrl: anthropicDefaultBaseUrl,
+    defaultModel: anthropicDefaultModel,
+    baseUrlOptions: [{ id: "anthropic-official", label: "Anthropic 官方", value: anthropicDefaultBaseUrl }],
+    modelOptions: [{ id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", value: anthropicDefaultModel }]
+  }
+];
+
+export type CompatibleApiConfig = {
+  provider: AiProvider;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+};
 
 export type DeepSeekCandidate = {
   id: string;
@@ -100,26 +164,108 @@ const numberValue = (value: unknown, fallback: number, min: number, max: number)
 
 export const mapDeepSeekStatusToError = (status: number): ApiErrorBody => {
   if (status === 401) {
-    return { error: { code: "DEEPSEEK_AUTH_FAILED", message: "DeepSeek API Key 无效。" } };
+    return { error: { code: "COMPATIBLE_API_AUTH_FAILED", message: "兼容 API Key 无效。" } };
   }
 
   if (status === 402) {
-    return { error: { code: "DEEPSEEK_INSUFFICIENT_BALANCE", message: "DeepSeek 账户余额不足。" } };
+    return { error: { code: "COMPATIBLE_API_INSUFFICIENT_BALANCE", message: "兼容 API 账户余额不足。" } };
   }
 
   if (status === 429) {
-    return { error: { code: "DEEPSEEK_RATE_LIMITED", message: "DeepSeek 请求过快，请稍后再试。" } };
+    return { error: { code: "COMPATIBLE_API_RATE_LIMITED", message: "兼容 API 请求过快，请稍后再试。" } };
   }
 
   if (status >= 500) {
-    return { error: { code: "DEEPSEEK_UNAVAILABLE", message: "DeepSeek 服务暂时不可用。" } };
+    return { error: { code: "COMPATIBLE_API_UNAVAILABLE", message: "兼容 API 服务暂时不可用。" } };
   }
 
-  return { error: { code: "DEEPSEEK_REQUEST_FAILED", message: "DeepSeek 请求失败。" } };
+  return { error: { code: "COMPATIBLE_API_REQUEST_FAILED", message: "兼容 API 请求失败。" } };
 };
 
 export const parseApiKey = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
+
+export const parseAiProvider = (value: unknown): AiProvider =>
+  value === "gemini" || value === "anthropic" || value === "openai-compatible"
+    ? value
+    : compatibleApiDefaultProvider;
+
+export const getProviderDefaults = (provider: AiProvider) =>
+  aiProviderOptions.find((option) => option.id === provider) ?? aiProviderOptions[0];
+
+export const parseCompatibleApiBaseUrl = (
+  value: unknown,
+  provider: AiProvider = compatibleApiDefaultProvider
+) => {
+  const raw = typeof value === "string" && value.trim() ? value.trim() : getProviderDefaults(provider).defaultBaseUrl;
+
+  try {
+    const url = new URL(raw);
+
+    if (url.protocol !== "https:") {
+      return "";
+    }
+
+    url.search = "";
+    url.hash = "";
+
+    const pathname = url.pathname.replace(/\/+$/, "");
+    return `${url.origin}${pathname === "" ? "" : pathname}`;
+  } catch {
+    return "";
+  }
+};
+
+export const parseCompatibleApiModel = (
+  value: unknown,
+  provider: AiProvider = compatibleApiDefaultProvider
+) => {
+  const raw = typeof value === "string" && value.trim() ? value.trim() : getProviderDefaults(provider).defaultModel;
+  const model = raw.replace(/^models\//, "").trim().slice(0, 120);
+
+  return model || getProviderDefaults(provider).defaultModel;
+};
+
+export const parseCompatibleApiConfig = (value: {
+  provider?: unknown;
+  apiKey?: unknown;
+  baseUrl?: unknown;
+  model?: unknown;
+}): { ok: true; config: CompatibleApiConfig } | { ok: false; status: number; body: ApiErrorBody } => {
+  const provider = parseAiProvider(value.provider);
+  const apiKey = parseApiKey(value.apiKey);
+  const baseUrl = parseCompatibleApiBaseUrl(value.baseUrl, provider);
+  const model = parseCompatibleApiModel(value.model, provider);
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: { code: "MISSING_API_KEY", message: "请先填写兼容 API Key。" } }
+    };
+  }
+
+  if (!baseUrl) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: { code: "INVALID_COMPATIBLE_API_BASE_URL", message: "兼容 API Base URL 必须是 HTTPS 地址。" } }
+    };
+  }
+
+  if (!model) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: { code: "INVALID_COMPATIBLE_API_MODEL", message: "请填写兼容 API 模型名。" } }
+    };
+  }
+
+  return { ok: true, config: { provider, apiKey, baseUrl, model } };
+};
+
+export const buildCompatibleApiUrl = (baseUrl: string, pathname: string) =>
+  `${baseUrl}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
 
 export const parseDeepSeekCandidates = (value: unknown): DeepSeekCandidate[] => {
   if (!Array.isArray(value)) {
@@ -245,7 +391,7 @@ export const parseDeepSeekGeneratedResult = (
             difference:
               typeof item.difference === "string" && item.difference.trim()
                 ? item.difference.trim()
-                : "DeepSeek 将其列为备选匹配。"
+                : "兼容模型将其列为备选匹配。"
           };
         })
         .filter((item): item is DeepSeekTopCandidate => Boolean(item))
@@ -259,7 +405,7 @@ export const parseDeepSeekGeneratedResult = (
           idolId: item.id,
           idolName: item.name,
           score: item.score,
-          difference: "DeepSeek 未返回差异说明，保留候选短名单排序。"
+          difference: "兼容模型未返回差异说明，保留候选短名单排序。"
         }));
 
   const result = {
